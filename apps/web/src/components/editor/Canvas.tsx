@@ -71,6 +71,7 @@ export default function Canvas() {
   const pinch = useRef<Pinch>(null)
   const pinching = useRef(false)
   const touchCount = useRef(0)
+  const activeTouches = useRef(new Map<number, { x: number; y: number }>())
   const selectedRef = useRef(selectedId)
   selectedRef.current = selectedId
   const layersRef = useRef(project.layers)
@@ -281,12 +282,41 @@ export default function Canvas() {
       ref={ref}
       className="checkerboard relative flex flex-1 touch-none items-center justify-center overflow-hidden"
       onPointerDownCapture={(e) => {
-        // Capture the second touch before a child layer can select itself. This
-        // matters when the second finger lands directly on another element.
-        if (e.pointerType === 'touch' && touchCount.current >= 1) {
-          e.preventDefault()
-          e.stopPropagation()
+        if (e.pointerType !== 'touch') return
+        activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+        if (activeTouches.current.size < 2) return
+
+        // Pointer events can reach a child layer before touchstart. Lock the
+        // already-selected layer here so a second finger landing on another
+        // layer can never replace the pinch target.
+        e.preventDefault()
+        e.stopPropagation()
+        if (pinching.current) return
+
+        const points = [...activeTouches.current.values()].slice(0, 2)
+        const startDist = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y)
+        if (!startDist) return
+        const selected = layersRef.current.find((l) => l.id === selectedRef.current)
+        if (selected && !selected.locked) {
+          const h = selected.type === 'text' ? (selHRef.current || selected.h) : selected.h
+          pinch.current = { mode: 'resize', id: selected.id, startDist, w0: selected.w, h0: h, x0: selected.x, y0: selected.y, fontSize: selected.fontSize || 40 }
+        } else {
+          const rect = ref.current?.getBoundingClientRect()
+          if (!rect) return
+          const v = viewRef.current
+          const mid = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 }
+          const cx = rect.left + rect.width / 2
+          const cy = rect.top + rect.height / 2
+          pinch.current = { mode: 'zoom', startDist, s0: v.scale, lx: (mid.x - cx - v.x) / v.scale, ly: (mid.y - cy - v.y) / v.scale }
         }
+        pinching.current = true
+        gesture.current = null
+      }}
+      onPointerUpCapture={(e) => {
+        if (e.pointerType === 'touch') activeTouches.current.delete(e.pointerId)
+      }}
+      onPointerCancelCapture={(e) => {
+        if (e.pointerType === 'touch') activeTouches.current.delete(e.pointerId)
       }}
       onPointerDown={(e) => {
         // The second touch belongs to the active pinch. A first touch on the
