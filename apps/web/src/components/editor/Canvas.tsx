@@ -251,7 +251,7 @@ export default function Canvas() {
   const startMove = (e: React.PointerEvent, l: Layer) => {
     // Once a second touch exists, do not let its hit-tested layer replace the
     // selection that the pinch gesture is resizing.
-    if (l.locked || editingId === l.id || pinching.current || (e.pointerType === 'touch' && touchCount.current >= 1)) return
+    if (l.locked || editingId === l.id || pinching.current || (e.pointerType === 'touch' && (touchCount.current >= 1 || activeTouches.current.size >= 1))) return
     e.stopPropagation()
     select(l.id)
     gesture.current = { id: l.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: l.h, fromCanvas: false, moved: false }
@@ -322,7 +322,7 @@ export default function Canvas() {
         // The second touch belongs to the active pinch. A first touch on the
         // background starts a deferred move for the selected layer: it becomes
         // a deselect on tap, or a drag when the pointer actually moves.
-        if (pinching.current || (e.pointerType === 'touch' && touchCount.current >= 1)) return
+        if (pinching.current || (e.pointerType === 'touch' && (touchCount.current >= 1 || activeTouches.current.size >= 1))) return
         if (e.pointerType === 'touch' && selectedId) {
           const selected = project.layers.find((l) => l.id === selectedId)
           if (selected && !selected.locked && editingId !== selected.id) {
