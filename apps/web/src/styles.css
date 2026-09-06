@@ -1,0 +1,87 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-heading: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+
+  --color-bg: #0A0A0A;
+  --color-surface: #111111;
+  --color-surface2: #161616;
+  --color-timeline: #171717;
+  --color-toolbar: #1A1A1A;
+  --color-line: rgba(255, 255, 255, 0.10);
+  --color-line-strong: rgba(255, 255, 255, 0.18);
+
+  --color-txt: #FFFFFF;
+  --color-txt2: #A1A1AA;
+  --color-txt3: #52525B;
+
+  --color-accent: #007AFF;
+  --color-accent-hover: #3B82F6;
+  --color-accent-active: #2563EB;
+  --color-danger: #FF3B30;
+
+  --color-track-video: #3B82F6;
+  --color-track-text: #F59E0B;
+  --color-track-shape: #A855F7;
+  --color-track-image: #10B981;
+  --color-track-sticker: #EC4899;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--color-bg);
+    color: var(--color-txt);
+    font-family: var(--font-sans);
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+  button { cursor: pointer; }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+
+  .checkerboard {
+    background-color: #0d0d0d;
+    background-image:
+      linear-gradient(45deg, #1a1a1a 25%, transparent 25%),
+      linear-gradient(-45deg, #1a1a1a 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #1a1a1a 75%),
+      linear-gradient(-45deg, transparent 75%, #1a1a1a 75%);
+    background-size: 22px 22px;
+    background-position: 0 0, 0 11px, 11px -11px, -11px 0;
+  }
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.animate-sheet { animation: sheet-up 0.26s cubic-bezier(0.22, 1, 0.36, 1); }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade { animation: fade-in 0.2s ease; }
+
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-pop { animation: pop-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }

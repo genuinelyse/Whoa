@@ -1,0 +1,68 @@
+{
+  "summary": "Re-test of the 3 critical + 5 medium fixes in the 'Bannr' frontend-only banner builder (Vite+React19, no backend). ALL 6 RETEST ITEMS PASS. Verified: (1) artboard aspect ratio now exact for preset-ig-post (1.000), preset-ig-story (0.562), preset-ad-mrec (1.200), preset-vid-land (1.778) and template-t-yt (1.778) - backgrounds fill the artboard and added layers stay inside its bounds; (2) animated mode toggle gets the bg-accent active class, mode-static loses it, play advances time-display (0.0s -> 1.5s), the 'rise' animation is observed on the layer (opacity 0.70 -> 1, translateY 8.3px -> 0), a right-trimmed clip's layer node is removed from the DOM once the playhead passes its end and reappears when scrubbed back, Export offers MP4/GIF in Animated and PNG/JPG (no MP4) in Static; (3) double-tap text edit commits in CORRECT order on blur ('LIVE EDITED'); (4) project-title is visible (114x32.5 at 390px viewport) and tappable -> project-title-input -> rename persists, undo/redo removed; (5) all 6 primary tools fit inside the 390px toolbar (last tool right edge 364 < 390); (6) default zoom fits the 5s project, trim-r handle reachable without scrolling (x+w=325 < 390) and right-trim works (clip 250px -> 96px), zoom-in/out work (250->400->250), time-display formats as '3.6s / 5.0s', split-btn is disabled. Regression pass: home (Recent x3, Templates x6), preset picker with 4 category tabs (6/6/3/4 presets), add text/shape/sticker/stock-image, background solid+gradient+image applied to artboard, font(7)/color(12)/align(3) panels, duplicate/delete, layers panel show/hide, back navigation. `npx tsc --noEmit` is clean (excluding the known unused ui/routes leftovers). ZERO console/pageerror events across all flows.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Canvas.tsx - LayerContent contentEditable",
+        "issue": "LOW (behavioural nit, not the old reversal bug): on double-tap the caret lands at offset 0 instead of selecting/placing at the tapped word, so typing without first pressing End prepends text ('HELLO' + 'Add a heading' -> 'HELLOAdd a heading'). Character order is correct, but users tapping to edit will prepend rather than append. Consider selecting all content (or placing the caret via the pointer position) when entering edit mode.",
+        "selector": "[data-testid^=\"layer-\"] [contenteditable]",
+        "priority": "LOW"
+      },
+      {
+        "component": "Timeline.tsx - track rows",
+        "issue": "LOW: with 4+ layers the lower clip rows fall below the visible timeline area (measured clip bottom 882 vs 844 device frame at 390x844). The track (h-40, overflow-auto) does scroll vertically but there is no scroll affordance, so lower rows and their trim handles look inaccessible. Consider a taller track on tall viewports or a fade/scroll hint.",
+        "selector": "[data-testid^=\"clip-\"]",
+        "priority": "LOW"
+      },
+      {
+        "component": "Timeline.tsx - scrub",
+        "issue": "LOW: pointerdown on a clip stops propagation, so tapping anywhere on a clip selects the layer but never moves the playhead. Scrubbing only works on empty track/ruler space. Acceptable, but a dedicated ruler-only scrub strip (or scrub-on-drag over clips) would be more predictable.",
+        "selector": "[data-testid=\"playhead\"]",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Editor / Canvas",
+        "issues": [
+          "Artboard uses only 86% of the smaller canvas dimension, so wide presets (16:9, 300x250) leave a large empty checkerboard area above/below the banner. Not a defect, but a fit-to-width scale would use the mobile screen better."
+        ]
+      },
+      {
+        "screen": "PresetPicker",
+        "issues": [
+          "The category tab strip is horizontally scrollable and after selecting the last tab the first tab ('Social Media') is partially cut off with no fade/scroll affordance."
+        ]
+      },
+      {
+        "screen": "Home",
+        "issues": [
+          "search-btn is still a dead control (no behaviour) - carry-over from iteration_1; either wire it or remove it."
+        ]
+      }
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_2.json", "/app/test_reports/iteration_1.json"],
+  "action_items": [
+    "OPTIONAL/LOW: place the caret (or select-all) when entering text edit mode so typing does not prepend.",
+    "OPTIONAL/LOW: make lower timeline rows discoverable (taller track or scroll affordance) when a project has 4+ layers.",
+    "OPTIONAL/LOW: remove or wire the dead home search-btn.",
+    "Consider adding `tsc --noEmit` to the build script - it currently passes and would have caught the iteration_1 `mode` bug."
+  ],
+  "critical_code_review_comments": [
+    "Fixes verified in code: store/editor.tsx now exposes `mode: state.project.mode` with memoized value + useCallback actions; Canvas artboard has `shrink-0` and `active = mode==='animated' && !(!playing && time===0)`; contentEditable is uncontrolled and commits on blur; Timeline default ppms 0.05 + fmt() in seconds + split disabled; Toolbar w-14 buttons.",
+    "Canvas.tsx anim(): the entrance animation duration is hard-coded to 450ms; move it to a constant/per-layer field before the backend phase.",
+    "Timeline.tsx keyframe-btn now uses a safe find + guard (good). Panels.tsx selected-only sheets are guarded (good).",
+    "No persistence layer: renames/layers/background are lost on Home navigation and Recent thumbnails never update - expected for the mock prototype, but blocking for real usage."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (no backend)", "frontend": "100% of the 6 retest items and all regression checks passed (0 critical, 0 high; 3 LOW polish items)" },
+  "seed_data_creation": "None. Used built-in mock data (seedProjects recents, TEMPLATES, PRESETS).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "N/A - no auth; /app/memory/test_credentials.md does not exist.",
+  "context_for_next_testing_agent": "Preview URL: https://d4afb135-e60c-44c7-8ebd-8c442bcd4568.preview.emergentagent.com (Vite SPA at root, /app/frontend -> /app/apps/web symlink, no backend/api). All iteration_1 criticals are fixed and verified. Testing gotchas: (a) '[data-testid^=\"layer-\"]' also matches layer-row-/layer-vis-/layer-up- rows in the Layers sheet - scope to the canvas when counting layers; (b) tool sheets do NOT close on Escape, click [data-testid=sheet-close]; (c) bg swatch testids contain '#' (e.g. bg-color-#FF3B30) so quote the attribute value in selectors; (d) timeline clips for the 4th+ layer sit below the 844px viewport - pick a clip whose bounding box bottom <= viewport height before dragging trim handles; (e) scrub by clicking empty track space, not on a clip; (f) the preset picker keeps the last selected category tab, click cat-Social Media before preset-ig-post.",
+  "rca_of_the_issue": "No new defects. The two apparent failures during testing were test-harness artifacts: a right-trim drag failed because the targeted clip was vertically outside the 844px viewport, and a scrub click failed because it landed on a clip (which stops propagation) - both reproduced correctly once retargeted."
+}

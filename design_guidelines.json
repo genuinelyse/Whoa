@@ -1,0 +1,149 @@
+{
+  "theme_preference": "dark",
+  "archetype": "THE PERFORMANCE PRO (Elite & Precision) / SWISS & HIGH-CONTRAST",
+  "typography": {
+    "headings": "Manrope",
+    "body": "IBM Plex Sans",
+    "rules": [
+      "Use 'Manrope' for all UI headings, toolbars, and layer titles (tight tracking).",
+      "Use 'IBM Plex Sans' for secondary text, timestamps, and data.",
+      "Never use Inter for headings.",
+      "Headings should max out at text-2xl in the editor to save space, keeping a dense, professional UI."
+    ]
+  },
+  "colors": {
+    "background": {
+      "main": "#0A0A0A",
+      "canvas_wrapper": "#111111",
+      "timeline": "#171717",
+      "toolbar": "#1A1A1A"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA",
+      "muted": "#52525B"
+    },
+    "accent": {
+      "primary": "#007AFF",
+      "hover": "#3B82F6",
+      "active": "#2563EB",
+      "danger": "#FF3B30",
+      "track_video": "#3B82F6",
+      "track_text": "#F59E0B",
+      "track_audio": "#10B981"
+    }
+  },
+  "visual_enhancers": {
+    "surfaces": [
+      "Editor UI should feel like a 'Tactical' command center.",
+      "Use flat solid backgrounds with sharp 1px borders (`border-white/10`) to separate the canvas, timeline, and toolbars.",
+      "No glassmorphism inside the editor screen to prevent visual distraction.",
+      "Canvas area should have a checkerboard pattern background to indicate transparency behind the banner."
+    ],
+    "shadows": [
+      "Keep shadows minimal. Use 1px inner strokes instead of drop shadows to define active elements."
+    ]
+  },
+  "layouts": {
+    "global": "Mobile-first, strict 100vh layout with NO page scrolling. Internal sections scroll independently.",
+    "home_screen": {
+      "description": "Project gallery and templates.",
+      "structure": "Standard scrolling page. Top nav, hero 'New Project' button, followed by Bento Grid of templates.",
+      "grid": "Bento layout for templates (mix of col-span-2 and row-span-2 to represent different aspect ratios like 16:9, 1:1, 9:16)."
+    },
+    "editor_screen": {
+      "description": "The main CapCut-style interface.",
+      "structure": "Flex column, full height (h-screen w-full overflow-hidden).",
+      "sections": [
+        {
+          "name": "Top Bar",
+          "height": "h-14",
+          "content": "Back button, Project Title, Undo/Redo, Export Button."
+        },
+        {
+          "name": "Canvas (Preview Area)",
+          "height": "flex-1",
+          "content": "Checkerboard background. Centered banner artboard with mock transform handles (dots on corners). Should scale to fit available space."
+        },
+        {
+          "name": "Contextual Toolbar",
+          "height": "h-14",
+          "content": "Horizontal scrolling list of tools. Changes based on selection (e.g., if Text is selected -> Font, Style, Color). If nothing is selected -> Add Media, Text, Elements."
+        },
+        {
+          "name": "Timeline Area",
+          "height": "h-48 or h-1/3",
+          "content": "Multi-track timeline. Left column for track types/visibility toggles. Right area horizontally scrollable. Vertical white line for Playhead. Tracks are colored bars (blue for video/bg, yellow for text, etc.)."
+        }
+      ]
+    }
+  },
+  "motion": {
+    "rules": [
+      "Use framer-motion for tool transitions and bottom sheet animations.",
+      "Do NOT use 'transition-all' universally.",
+      "Timeline scrubbing (mocked) should have zero transition delay for snappy feel."
+    ]
+  },
+  "accessibility": {
+    "rules": [
+      "All buttons must have a `:hover` and `:active` state.",
+      "Focus rings on input fields.",
+      "Include data-testid on all interactive elements (e.g., 'data-testid=\"export-btn\"').",
+      "Ensure contrast ratio is > 4.5:1 for text on dark backgrounds."
+    ]
+  },
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMGdyYWRpZW50JTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODc0OTE4NDJ8MA&ixlib=rb-4.1.0&q=85",
+        "category": "Canvas Background",
+        "description": "Abstract gradient to serve as a mock banner background in the editor."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1635776063043-ab23b4c226f6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHw0fHxhYnN0cmFjdCUyMGdyYWRpZW50JTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODc0OTE4NDJ8MA&ixlib=rb-4.1.0&q=85",
+        "category": "Template Thumbnails",
+        "description": "Gradient background for template cards on the Home screen."
+      },
+      {
+        "url": "https://images.pexels.com/photos/15635399/pexels-photo-15635399.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "category": "Template Thumbnails",
+        "description": "Social media poster thumbnail."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "TimelineTrack",
+      "description": "A horizontal bar representing a layer. Needs trim handles on the edges.",
+      "classes": "h-10 rounded-md flex items-center px-2 relative group overflow-hidden border border-white/20"
+    },
+    {
+      "name": "Playhead",
+      "description": "Vertical white line indicating current time.",
+      "classes": "absolute top-0 bottom-0 w-0.5 bg-white z-10 before:content-[''] before:absolute before:-top-3 before:-left-1.5 before:w-3.5 before:h-3.5 before:bg-white before:rounded-sm"
+    }
+  ],
+  "instructions_to_main_agent": {
+    "setup": [
+      "Install required icons: `yarn add @phosphor-icons/react` or use `lucide-react`.",
+      "Ensure fonts Manrope and IBM Plex Sans are imported in index.css.",
+      "Build a dark mode UI primarily. Avoid bright backgrounds in the editor."
+    ],
+    "implementation_steps": [
+      "1. Build the Home screen with a 'Recent Projects' list and a 'Templates' grid.",
+      "2. Build the Editor layout wrapper: flex-col, h-screen, overflow-hidden.",
+      "3. Implement the Top Navigation bar with Export button.",
+      "4. Implement the Canvas area with a mock artboard (e.g., aspect-video) centered in the available space.",
+      "5. Implement the Contextual Toolbar (middle). Provide a mock state toggle: 'clip_selected' vs 'nothing_selected' to show different tools.",
+      "6. Implement the Timeline at the bottom. Render 3 mock tracks: Video/BG, Text, and Overlay. Include a playhead."
+    ],
+    "universal_guidelines": [
+      "Create depth through layered design elements with z-index hierarchy.",
+      "Use crisp 1px borders instead of heavy shadows for a professional tool aesthetic.",
+      "Never use AI assistant Emoji characters.",
+      "Prioritize mobile-first view (stacking vertically), but ensure it scales well on desktop (canvas expands, timeline stays fixed height at bottom).",
+      "Add interactive hover states to all timeline clips and toolbar buttons."
+    ]
+  }
+}
