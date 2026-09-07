@@ -1,0 +1,32 @@
+{
+  "summary": "Frontend-only verification of the NEW canvas-only pinch/zoom feature in Bannr plus full regression. ALL PRIMARY ZOOM REQUIREMENTS PASS. ctrl+wheel over [data-testid=canvas] scales ONLY the zoom-layer div (transform matrix a: 1 -> 2.718 on one -100 deltaY notch) while the artboard keeps its own fit scale (0.3667) and window.visualViewport.scale stays exactly 1 (page never zooms); the wheel event is preventDefault-ed (defaultPrevented=true). Clamping verified exactly: 30 zoom-in notches stop at 6.0, 60 zoom-out notches stop at 0.5. Global page-zoom prevention verified: ctrl+wheel dispatched on document.body is defaultPrevented=true (App.tsx document guard). Non-ctrl wheel at 1x is NOT prevented (transform unchanged) and when zoomed>1 it pans the zoom-layer (matrix translate 0,0.5 -> -50,-59.5) and is prevented. [data-testid=reset-zoom] appears with label '272% \u00b7 Reset' (regex '\\d+% \u00b7 Reset'), clicking it returns scale to exactly 1 and the button unmounts; zoom also resets when the project is reopened. TOUCH pinch verified via CDP Input.dispatchTouchEvent: two points spreading 80->340px zoomed 1 -> 4.25, converging 340->100px zoomed 4.25 -> 1.25, and a single-finger drag did NOT change scale (1.25 -> 1.25). Interactions while zoomed to exactly 2x (eff = 0.3667*2 = 0.7333): dragging a shape body -40,-30 screen px moved the layer -54.545,-40.909 artboard px vs expected -54.545,-40.909 (exact, drag math divides by fitScale*zoom correctly); resize handles keep a constant 41.8px on-screen size at 1x and 2x; all four corners resized with the correct 1/eff delta (br +55 expected +55, tl +41/+41, tr +41/+41, bl +27/+27). Regression (zero console/page errors throughout): Home + preset picker (preset-ig-post) + templates t-summer/t-poster open; add text/shape/sticker/stock-image all increment layer count (unsplash img naturalWidth=6000); background solid (#FFFFFF), gradient (linear-gradient applied) and image (unsplash url) applied to artboard; font (IBM Plex Sans), color (#FF3B30), Style size slider (194px -> 211px), align left; layers panel (4 rows, visibility toggle removes/restores render, layer-down reorders); double-tap text edit commits on tapping EMPTY canvas ('QA1') and on blur ('BLR'); timeline play 0.0s->1.2s and scrub to 1.3s; mode-animated + anim-rise; export flow MP4 (mocked) reaches export-done; editor-back returns Home. ONE pre-existing minor bug found: dragging a TEXT layer to the bottom clamps against the stale stored layer.h instead of the rendered auto height, letting text overflow the artboard bottom by ~50 screen px.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Canvas.tsx - startMove / pointermove clamp",
+        "issue": "PRE-EXISTING MINOR: text layers use height:auto but the move gesture clamps with g.oh = layer.h (stale, e.g. 105) instead of the measured rendered height (243). Dragging a text layer to the bottom stops at y=975 on a 1080 artboard, so the glyphs render ~50 screen px (~136 artboard px) below the artboard onto the checkerboard. Same stale h is used for the top/left clamp of tall text.",
+        "selector": "[data-testid=\"layer-<id>\"]",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL (low): pass the measured box height (selH / offsetHeight) into startMove for text layers so the drag clamp matches the rendered height and text cannot overflow the artboard bottom."
+  ],
+  "critical_code_review_comments": [
+    "Zoom implementation is sound: zoomAt() clamps to [0.5,6], keeps the focal point stable, wheel/touch listeners are registered non-passive on the canvas ref only, and drag/resize math consistently uses eff = fitScale * view.scale (verified numerically exact at 2x).",
+    "pinching ref correctly blocks startMove/startResize during a 2-finger gesture; single-finger touch never triggers pinch (verified via CDP).",
+    "Canvas.tsx is ~440 lines and now mixes fit-scale, zoom/pan gestures, layer drag/resize and text editing - consider extracting a useCanvasZoom hook and LayerContent/EditableText into their own files before it grows past 700 lines."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (frontend-only, no backend)", "frontend": "97% (all zoom + regression checks pass; 1 pre-existing minor text-clamp bug)" },
+  "seed_data_creation": "None persisted (all in-memory mock data). Test artifacts created only in transient sessions: a rect shape, text 'QA1'/'BLR' edits on template-t-summer.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Canvas-only pinch/zoom is fully verified (ctrl+wheel, CDP two-finger touch, clamping 0.5-6x, page-zoom prevention on body, reset-zoom, pan when zoomed, drag/resize math at 2x). Testing tips: (1) toolbar is contextual - deselect via canvas(20,20) before clicking tool-layers/tool-elements, and always close the sheet with [data-testid=sheet-close] before the next tool click or the sheet overlay intercepts clicks; (2) template layers overlap so Playwright .click() on a lower layer is intercepted - dispatch synthetic pointerdown/pointerup or add a fresh shape via add-shape-rect (centered, 378x378) for drag/resize math tests; (3) full-width text layers have x clamped to 0 so use a non-full-width layer to assert horizontal drag deltas; (4) two-finger pinch works via page.context.new_cdp_session(page) + Input.dispatchTouchEvent (note: page.context is a property, not callable); (5) read scale from getComputedStyle('[data-testid=canvas] > div:first-child').transform via DOMMatrixReadOnly.",
+  "rca_of_the_issue": "Text drag overflow: in Canvas.tsx startMove stores oh: l.h, but text layers render with height:'auto' so the real box height (offsetHeight / selH) can be far larger than the stored l.h after font-size/text changes. The pointermove clamp y = clamp(oy+dy, 0, PH - g.oh) therefore permits y values that push the rendered text below the artboard. Reproduce: open template-t-summer, double-tap the 'UP TO 50% OFF' text, retype a short string (rendered height grows to 243 while l.h stays 105), then drag the layer to the bottom - it settles at y=975 and overflows ~50 screen px past the artboard."
+}

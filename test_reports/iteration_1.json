@@ -1,0 +1,120 @@
+{
+  "summary": "Frontend-only E2E testing of the 'Bannr' mobile-first banner builder (Vite+React19 SPA, no backend). Covered: Home (header/Recent x3/Templates x6), PresetPicker (4 category tabs, preset selection), template open, Editor layout, all 6 primary tools + bottom sheets, add text/5 shapes/sticker/stock image, font/color/style/align/opacity/radius/mask panels, duplicate/delete/reorder, Layers panel (select, visibility, up/down, delete), Animate panel, Timeline (play/pause, scrub, zoom in/out, clip select, trim L/R), Export sheet (format/quality/progress/done), back navigation, sheet containment inside the 440px device frame, mobile (390x844) + desktop (1920x1080) viewports. NO uncaught JS/console errors were observed in any flow. Most interactions work, but 3 critical defects were found: (1) artboard is squeezed by flexbox so every banner renders at the wrong aspect ratio with layers spilling outside the canvas, (2) `mode` is never exposed by the editor context so Animated mode is completely dead (no active state, no animations, no clip-range visibility, export always offers static formats), (3) double-tap text editing inserts characters in reverse order.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Canvas.tsx - artboard",
+        "issue": "CRITICAL: artboard renders at the WRONG ASPECT RATIO and layers spill outside the canvas. The artboard div (width:preset.w) is a flex item inside `flex flex-1 items-center justify-center` and gets flex-shrunk: for preset ig-post (1080x1080) computed width is 390px while height stays 1080px, so the scaled box measures 121x335 (aspect 0.36 instead of 1.0). Background only paints the squeezed strip while text/shape/sticker/image layers render outside it and get clipped by the device frame. Repro: New Banner -> preset-ig-post -> add text; measured getBoundingClientRect = {w:121.1, h:335.4}, computed style width '390px'. Fix: add `shrink-0` (flex-shrink:0) to the artboard div (or wrap it in a non-flex centering wrapper) so its layout width stays preset.w.",
+        "selector": "[data-testid=\"artboard\"]",
+        "priority": "CRITICAL"
+      },
+      {
+        "component": "store/editor.tsx + TopBar/Canvas/ExportSheet",
+        "issue": "CRITICAL: `mode` is destructured from useEditor() in TopBar.tsx:6, Canvas.tsx:49 and ExportSheet.tsx:6 but the context State/Ctx never expose it (it lives on project.mode) -> it is `undefined` at runtime. Consequences verified in the browser: (a) mode-static/mode-animated never get the active `bg-accent` class, so the toggle looks dead; (b) Canvas `animated` is always false so animations (rise/fade/pop/slide) never play and layers are NOT hidden outside their clip range (scrubbed to 3.6s past a trimmed clip end, layer opacity still 1); (c) ExportSheet always offers PNG/JPG/SVG - MP4/GIF are never offered even after switching to Animated. `npx tsc --noEmit` confirms: \"Property 'mode' does not exist on type 'Ctx'\" (3 occurrences). Fix: add `mode: 'static' | 'animated'` to Ctx and set `mode: state.project.mode` in the provider value.",
+        "selector": "[data-testid=\"mode-animated\"], [data-testid=\"fmt-MP4\"]",
+        "priority": "CRITICAL"
+      },
+      {
+        "component": "Canvas.tsx - LayerContent contentEditable",
+        "issue": "CRITICAL: double-tap text editing types characters in REVERSE ORDER. Repro: open template-t-poster, dblclick text layer 'LIVE', type ' EDITED' -> result is 'DETIDE LIVE'. Root cause: the contentEditable is controlled ({layer.text} as children) and each onInput dispatches updateLayer, React re-renders the node and resets the caret to offset 0, so every keystroke is inserted at the start. Fix: render text uncontrolled (set initial content once via ref/defaultValue and only commit on blur), or restore the selection after update.",
+        "selector": "[data-testid^=\"layer-\"] [contenteditable]",
+        "priority": "CRITICAL"
+      },
+      {
+        "component": "TopBar.tsx - project title",
+        "issue": "project-title button collapses to 0px width at the mobile frame width (measured {w:0, h:20} at 390px viewport; innerText 'Untitled Banner1:1'). The project name/ratio is invisible and the rename affordance is unreachable on mobile - the primary target device. Caused by too many fixed-width siblings (mode toggle + undo + redo + Export) in a 440px row against a `flex-1 min-w-0` title. Fix: shrink/move the mode toggle, drop undo/redo icons or move the title to its own row.",
+        "selector": "[data-testid=\"project-title\"]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Toolbar.tsx",
+        "issue": "The 6th primary tool ('Layers') is clipped off the device frame: toolbar clientWidth 390 vs scrollWidth 420, tool-layers right edge = 412 > toolbar right edge = 390. It is horizontally scrollable but there is no scroll affordance, so it reads as a broken/cut-off button on a 390px phone. Fix: reduce w-16 to w-14 / tighten gaps so all 6 fit, or add a visible fade/scroll hint.",
+        "selector": "[data-testid=\"tool-layers\"]",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "Timeline.tsx - trim-r handle",
+        "issue": "At the default zoom (ppms 0.09) a full-duration 5s clip is 450px wide inside a ~294px visible track, so the RIGHT trim handle sits off-screen (bounding box x=537 on a 390px viewport) and is untappable until the user discovers horizontal scrolling. Verified working after two zoom-out clicks (clip 150px -> trimmed to 100px). Left trim works at default zoom. Fix: default the zoom so the project duration fits the track width (fit-to-duration), or clamp/pin the right handle into view.",
+        "selector": "[data-testid^=\"trim-r-\"]",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "TopBar.tsx / Timeline.tsx",
+        "issue": "undo-btn, redo-btn and split-btn are rendered as enabled-looking controls but are complete no-ops (no onClick). They should be disabled/greyed or removed in the prototype to avoid dead-click confusion.",
+        "selector": "[data-testid=\"undo-btn\"], [data-testid=\"redo-btn\"], [data-testid=\"split-btn\"]",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "Timeline.tsx - fmt()",
+        "issue": "time-display uses `seconds:centiseconds`, so a 5000ms duration renders as '5:00' (reads as 5 minutes) and playback shows impossible-looking values like '3:60'. Fix: use mm:ss.cs or '3.60s' style formatting.",
+        "selector": "[data-testid=\"time-display\"]",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Animate -> Animated mode -> Timeline preview -> Export",
+        "issue": "Applying an animation (anim-rise) correctly dispatches setMode('animated') into project.mode, but because the context does not expose `mode`, nothing downstream reacts: no active toggle state, no animation/clip-range rendering on the canvas during playback, and export formats stay PNG/JPG/SVG. The entire 'animated banner' value proposition is non-functional end to end.",
+        "affected_selectors": ["[data-testid=\"anim-rise\"]", "[data-testid=\"mode-animated\"]", "[data-testid=\"artboard\"]", "[data-testid=\"fmt-MP4\"]"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "Editor / Canvas",
+        "issues": [
+          "Artboard aspect ratio is wrong for every preset and layers render outside the banner bounds (see ui_bugs) - this makes the core WYSIWYG canvas untrustworthy.",
+          "Top bar is overcrowded at 390-440px: project name is fully squeezed out (0px)."
+        ]
+      },
+      {
+        "screen": "Editor / Toolbar + Timeline",
+        "issues": [
+          "6th tool label clipped at the frame edge with no scroll affordance.",
+          "Timeline default zoom does not fit the project duration, pushing clip ends and right trim handles off-screen."
+        ]
+      },
+      {
+        "screen": "Home",
+        "issues": [
+          "search-btn is a visible control with no behaviour (dead click).",
+          "Otherwise strong: dark theme contrast is fine, Recent (3) and Templates (6) render, all remote images loaded (0 broken images)."
+        ]
+      }
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_1.json"],
+  "action_items": [
+    "Add `shrink-0` / flex-shrink:0 to the artboard in Canvas.tsx so preset dimensions are respected (fixes wrong aspect ratio + layers spilling outside the banner).",
+    "Expose `mode` from the editor store: add `mode: 'static' | 'animated'` to Ctx and `mode: state.project.mode` to the provider value (fixes mode toggle active state, animated canvas preview, clip-range visibility and MP4/GIF export formats).",
+    "Fix double-tap text editing so typed characters are not reversed (uncontrolled contentEditable committing on blur, or restore caret after updateLayer).",
+    "Make the project title visible/tappable at 390-440px widths (top bar layout rework).",
+    "Fit all 6 primary tools inside the 390px toolbar (or add a scroll affordance).",
+    "Default the timeline zoom to fit project duration so clip ends and right trim handles are reachable.",
+    "Disable or remove no-op controls (undo-btn, redo-btn, split-btn, search-btn) or wire them up.",
+    "Fix time formatting in Timeline fmt() (5000ms currently renders as '5:00'; values like '3:60' appear).",
+    "Add a typecheck step (`tsc --noEmit`) to the build - the `mode` bug would have been caught at build time; the build script currently runs vite only."
+  ],
+  "critical_code_review_comments": [
+    "store/editor.tsx: State/Ctx omit `mode` while three components consume it -> silent `undefined`. This is the root cause of all animated-mode failures. Prefer deriving `mode` in the provider value from project.mode.",
+    "Canvas.tsx:49: `selected` is destructured but unused (dead code) and TS reports it.",
+    "Canvas.tsx:232: `ref={(el) => el && editing && el.focus()}` returns a value (null) from a callback ref - React 19 treats a non-function return as an error/warning. Use `ref={(el) => { el?.focus() }}` with an explicit block body.",
+    "Panels.tsx:6: `createLayer` imported but never used.",
+    "Panels.tsx useSel(): `selected!` non-null assertion - if the selected layer is deleted while a contextual sheet is open, panels will throw. Guard with an early return.",
+    "Timeline.tsx:79 keyframe-btn: `project.layers.find(l => l.id === selectedId)!.end` will crash if selectedId points at a removed layer. Use optional chaining.",
+    "Timeline.tsx: the pointermove effect depends on `updateLayer`/`setTime` which are recreated on every render (provider value is a fresh object, not memoized) - the window listeners are torn down and re-added on every state change. Wrap the store callbacks in useCallback and the value in useMemo.",
+    "store/editor.tsx: `duplicate` generates ids with Math.random() while data.ts has a uid() helper - consolidate to one id generator.",
+    "Editor is a client-only prototype with no persistence: renames, layers and background changes are lost on Home navigation (Recent thumbnails never update). Fine for a mock, but call it out before backend wiring."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (no backend)", "frontend": "~78% (35/45 checks passed; 3 critical + 5 medium/low defects)"},
+  "seed_data_creation": "None. Used built-in mock data (seedProjects() recents, TEMPLATES, PRESETS).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "N/A - /app/memory/test_credentials.md does not exist; app has no auth so no credentials are required.",
+  "context_for_next_testing_agent": "App is a Vite SPA at the preview root (no /api, no backend, no routing - view toggles between Home and Editor). Preview URL: https://d4afb135-e60c-44c7-8ebd-8c442bcd4568.preview.emergentagent.com. /app/frontend is a symlink to /app/apps/web. Use `cd /app/apps/web && npx tsc --noEmit` (ignore src/components/ui/** shadcn errors - those files are unused leftovers with missing deps) to catch type-level regressions. VERIFIED WORKING and no need to re-test in depth: home listings, preset picker + all 4 category tabs, template open (t-summer 4 layers, t-yt, t-poster), add text/all 5 shapes/sticker/stock image, font/color/style sliders/align/opacity/radius/mask panels, cut+merge mocked buttons, background solid/gradient/image, layers panel (select/hide/up/down/delete), duplicate/delete/reorder, timeline play-pause + scrub + zoom in/out + clip-click selection + left trim (and right trim once zoomed out), export sheet full flow (progress -> done), back navigation, bottom sheets stay contained in the 440px frame at 1920px. RETEST AFTER FIX: artboard aspect ratio for several presets (square, story 9:16, mrec 300x250), animated mode (toggle active state, animations playing during playback, layers hidden outside clip range, MP4/GIF export formats), double-tap text edit character order, project title visibility at 390px, toolbar fitting 6 tools.",
+  "rca_of_the_issue": "1) Artboard distortion: the artboard is a direct flex child of the canvas container with an explicit width of preset.w px; default flex-shrink:1 lets flexbox shrink it to the 390px container width while its height (1080px) is untouched, so the CSS `transform: scale()` then produces a non-uniform-looking box (121x335 for a 1:1 preset) and absolutely-positioned children render outside the painted background. 2) Animated mode dead: `mode` is read from the editor context in TopBar/Canvas/ExportSheet but was never added to the Ctx interface or the provider value, so it evaluates to undefined; TypeScript flags it but the build script never runs tsc, so it shipped silently. 3) Reversed text input: the contentEditable node is React-controlled - onInput -> updateLayer -> re-render replaces children with layer.text and resets the caret to offset 0, so each subsequent character is prepended."
+}

@@ -1,0 +1,49 @@
+{
+  "summary": "Frontend-only retest of Bannr fixes B2 (text commit) and C (artboard clamping) plus full regression. FIX C is VERIFIED FIXED: on template-t-poster a huge resize-br drag (+1200,+1200) stopped exactly at the artboard (0,0,1080x1350), document.elementFromPoint at all four handle centres returned resize-tl/tr/bl/br-<id> (not the toolbar), all 4 corners still resized shapes (324->433->542->651->760) and text (fontSize 324->275->242->217->201px) with selection retained, and body drags of +/-2000px clamped to x=AW-w / y=AH-h and back to x=0,y=0 (full-bleed still achievable). FIX B2 as shipped was a CRITICAL REGRESSION: double-tap-to-edit stopped working entirely - the EditableText mounted and was removed in the same tick (MutationObserver logged ADDED then REMOVED), no contenteditable ever stayed in the DOM, so none of the 4 commit paths could even be exercised. RCA: React 19 StrictMode double-invokes effects; the new `return () => commit()` cleanup ran on the StrictMode throw-away mount and commit() called onCommit which was wired to `onEdit(t); onEndEdit()` -> setEditingId(null) -> editor unmounted immediately (and `committed` ref stayed true, so the real mount could never commit either). Applied an in-scope React-lifecycle fix (no business logic changed): EditableText now takes separate onCommit/onDone props, the unmount cleanup only commits text (never ends edit), onBlur commits + calls onDone, and committed.current is reset at effect start for StrictMode. After the fix all 4 commit paths PASS: fast type -> click other layer (DEAL), fast type -> click EMPTY canvas(20,20) (DEAL), slow 180ms type -> empty canvas (SLOWOK), programmatic blur (BLURD), and a 10-char fast type committed as ABCDEFGHIJ with no double-append/garbling. Regressions all PASS with ZERO console/page errors: add text/shape/sticker/stock-image (unsplash img naturalWidth 6000), background solid/gradient/image applied to artboard, font (Manrope->Arial Black), color (#fff->#FF9500), align (center->left), Text Style sliders (size 324->334->63, weight->400, opacity->0.95), layers panel visibility toggle, timeline play 0.0s->1.4s and scrub to 4.8s, mode-animated + anim-rise selection, export flow (export-btn -> fmt-MP4 -> export-start -> export-done, mocked) and back to Home.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Canvas.tsx - EditableText (as shipped by iteration_5 dev fix)",
+        "issue": "CRITICAL (found, then fixed by tester): double-tap text editing was completely broken. StrictMode double-effect ran the new cleanup commit() -> onCommit (which also called onEndEdit) -> setEditingId(null), unmounting the editor instantly. Fixed by splitting onCommit/onDone so the unmount path only persists text, and by resetting the `committed` ref inside the effect. Please review/keep this change.",
+        "selector": "[data-testid^=\"layer-\"] [contenteditable]",
+        "priority": "CRITICAL"
+      },
+      {
+        "component": "Canvas.tsx - artboard overflow",
+        "issue": "MINOR/design: text layers with auto height are not clipped to the artboard - a long text (e.g. 'ABCDEFGHIJ' at fontSize 324) renders visibly outside the artboard rectangle over the checkerboard area. Consider overflow:hidden on the artboard so the preview matches the exported frame.",
+        "selector": "[data-testid=\"artboard\"]",
+        "priority": "LOW"
+      },
+      {
+        "component": "Canvas.tsx - resize clamp side effect",
+        "issue": "MINOR: during resize, w/h are clamped to preset.w/preset.h independently of x/y, so a layer at x>0 dragged wide snaps its x back to 0 (layer jumps left) once w hits the artboard width. Acceptable but slightly surprising; clamping w to (PW - x) for right-side corners would feel better.",
+        "selector": "[data-testid^=\"resize-\"]",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Editor / Text Style sheet",
+       "issues": ["Size/Weight/Opacity use unstyled native <input type=range> (default blue Chrome thumb/track) which is off-brand vs the rest of the dark iOS-style UI"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Review and keep the tester's EditableText fix in /app/apps/web/src/components/editor/Canvas.tsx (separate onCommit/onDone + committed-ref reset) - it is required for double-tap editing to work at all under React StrictMode.",
+    "Never call onEndEdit/setState-that-unmounts from a useEffect cleanup; StrictMode dev double-invocation will unmount the component immediately.",
+    "Optional: clip artboard content (overflow:hidden) so oversized text does not render outside the banner frame.",
+    "Optional: style the range sliders to match the dark UI."
+  ],
+  "critical_code_review_comments": [
+    "Effect cleanups must be idempotent and side-effect-free w.r.t. parent state under StrictMode; the `committed` ref persisted across the StrictMode remount and silently disabled the real commit.",
+    "Move/resize clamping is correct and now guarantees handles remain inside the clipped canvas."
+  ],
+  "updated_files": ["/app/apps/web/src/components/editor/Canvas.tsx"],
+  "success_rate": {"backend": "N/A (frontend-only app)", "frontend": "100% after the applied EditableText fix (0/5 text-commit cases passed before it)"},
+  "seed_data_creation": "None - in-memory mock templates only",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Fix C (clamping) and Fix A (handle occlusion) are verified good. Text editing now works after the tester's Canvas.tsx EditableText change (onCommit/onDone split + committed reset). Useful recipes: dblclick via page.mouse.dblclick at the layer's bbox centre (dispatchEvent does not work reliably); drag handles with mouse.down + 15 mouse.move steps; tool sheets stay open after selecting an option so click [data-testid=\"sheet-close\"] before opening the next tool; [data-testid^=\"layer-\"] also matches layers-panel rows (layer-row-*) so filter when counting canvas layers.",
+  "rca_of_the_issue": "React 19 StrictMode invokes mount effect -> cleanup -> mount again in dev. The new EditableText cleanup called commit(), whose onCommit prop was `(t) => { onEdit(t); onEndEdit() }`; onEndEdit set editingId=null in Canvas, so the editor was removed during the very first StrictMode pass (MutationObserver: ADDED then REMOVED) and `committed.current=true` blocked any later commit. Fix: cleanup commits text only (new onDone prop used by onBlur), and committed.current is reset at the start of the mount effect. Verified with 5 scenarios incl. tapping empty canvas at (20,20)."
+}

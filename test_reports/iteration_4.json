@@ -1,0 +1,50 @@
+{
+  "summary": "Re-test of the 2 HIGH fixes from iteration_3 on Bannr (frontend-only). FIX A (handle occlusion) is VERIFIED FIXED: on template-t-poster the circle was grown with resize-br until its bl/br corners sat inside the full-width 'SAT · 8PM' text band; document.elementFromPoint at all four handle centres returned the handle overlay (resize-tl/tr/bl/br-<id>), all four corners resized the circle (219x185 -> 279x215 -> 329x245 -> 359x275 -> 389x305), selection was retained on every drag, and text layers resize on all 4 corners with fontSize scaling (324px -> 373px -> 406px). FIX B is only PARTIALLY fixed: fast typing no longer loses characters INSIDE the editor (keyboard.type('DEAL') / 'HELLO QA' with no delay shows the full string live), but the COMMIT now fails for the most common user action - tapping empty canvas to finish editing discards the whole edit and the text reverts to its old value (both fast and slow typing). Commit works only when blur genuinely fires (clicking another layer, or el.blur()). Regressions all PASS with ZERO console/page errors: add text/shape/sticker/stock-image (image loads, naturalWidth>0), background solid/gradient/image all applied, font/color/align/style panels update computed styles, layers panel hide-show/reorder/delete, timeline play 0.0s->1.3s + scrub to 5.0s + zoom, mode-animated + anim-rise, export flow (export-btn -> fmt-MP4/GIF/PNG -> export-start -> export-progress -> export-done, mocked), back to Home with recents.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Canvas.tsx - EditableText commit / Canvas onPointerDown",
+        "issue": "HIGH (data loss, NEW regression from Fix B): text edits are lost when the user taps empty canvas to exit edit mode. Canvas's root onPointerDown does `select(null); setEditingId(null)` which synchronously UNMOUNTS <EditableText>; Chrome does not fire blur on a focused node that is removed from the DOM, so onBlur -> onCommit never runs and the store keeps the old text. Repro on template-t-summer: dblclick 'SALE' -> type 'ABC2' (live text shows ABC2) -> click canvas at (30,30) -> committed text is still the previous value. Matrix: click other layer = PASS ('DEAL' committed), programmatic document.activeElement.blur() = PASS ('XYZ1'), click empty canvas fast typing = FAIL, click empty canvas slow typing (180ms/char) = FAIL. Fix: commit in the EditableText useEffect cleanup (onCommit(ref.current.innerText) on unmount), or commit onInput, or in Canvas's pointerdown read the live innerText before clearing editingId.",
+        "selector": "[data-testid^=\"layer-\"] [contenteditable], [data-testid=\"canvas\"]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Canvas.tsx - handles outside artboard bounds",
+        "issue": "MEDIUM: the canvas wrapper is overflow-hidden, so once a layer is resized/moved past the artboard edge its handles are clipped and unreachable - elementFromPoint at resize-bl/br returns the bottom toolbar SPAN and the drags do nothing. Reproduced by growing the poster circle with resize-br by (120,220): height 339 pushed bl/br below the artboard, both corners became dead. Same for text grown wider than the artboard (tr/bl dead at w=496 vs artboard 396). With no undo the layer can only be fixed by dragging its body back. Suggest clamping resize/move to the artboard (or a small margin) and/or clamping the handle overlay inside the artboard.",
+        "selector": "[data-testid^=\"resize-\"]",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Home - template cards",
+        "issues": ["Template card titles are white text placed directly over light gradients (e.g. 'Summer Sale' on the pink/yellow card) - low contrast; add a scrim/gradient overlay behind the label."]
+      },
+      {
+        "screen": "Editor / Canvas",
+        "issues": ["Handle hit area ~29px on screen; still slightly under the 44px touch target guideline for a mobile-first app.", "No aspect-ratio lock, so circles/squares distort on corner drags."]
+      }
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_4.json", "/app/test_reports/iteration_3.json"],
+  "action_items": [
+    "Commit contentEditable text on unmount (useEffect cleanup in EditableText) or on input - tapping empty canvas currently discards the whole edit.",
+    "Clamp resize/move so layers (and therefore their handles) stay reachable inside the artboard, otherwise bl/br/tr handles become dead once the layer overflows the canvas (overflow-hidden)."
+  ],
+  "critical_code_review_comments": [
+    "Handle overlay (Canvas.tsx lines 182-220, zIndex 60, pointerEvents none/auto) is the correct fix for occlusion - verified with elementFromPoint on all 4 corners while overlapping a sibling text layer.",
+    "EditableText is uncontrolled with select-all in useEffect([]) - live typing is now correct, but it relies solely on onBlur for persistence, which is not guaranteed when React unmounts the focused node. Add a cleanup-time commit.",
+    "Canvas onPointerDown clears editingId before any blur handler can run; the deselect handler and the edit-commit handler race. Order them explicitly.",
+    "Still no max clamp on resize (only Math.max(20,...)), and no undo - a mis-drag can push a layer permanently off-canvas."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (no backend)", "frontend": "Fix A: PASS (8/8 corner drags across shape+text). Fix B: PARTIAL (2/4 commit paths pass; fast-typing itself fixed). Regressions: 100% pass, 0 console errors." },
+  "seed_data_creation": "None - used built-in mock templates/presets (template-t-poster, template-t-summer, preset-ig-post).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "N/A - no auth. /app/memory/test_credentials.md not present (only PRD.md).",
+  "context_for_next_testing_agent": "Preview: https://d4afb135-e60c-44c7-8ebd-8c442bcd4568.preview.emergentagent.com. Handle overlay fix confirmed; do NOT re-test occlusion unless Canvas.tsx changes. To re-test text commit use 4 paths: (1) click another layer, (2) el.blur(), (3) click empty canvas after fast typing, (4) after slow typing - only (3)/(4) fail today. Toolbar swaps to layer tools (Font/Color/Style/Align/Animate/Opacity/Forward) when a layer is selected, so click canvas(20,20) to deselect before using tool-text/elements/stickers/image/background/layers. Sheet items: add-text-800, add-shape-circle, sticker-<emoji>, stock-image-0, bg-color-#RRGGBB / bg-gradient-N / bg-image-N, sheet-close. Layers panel: layer-row-<id>, layer-vis/up/down/del-<id>. Keep resize drags small enough that handles stay inside the artboard (canvas is overflow-hidden).",
+  "rca_of_the_issue": "Fix A root cause was resolved by moving the 4 handles into a single absolutely-positioned overlay (zIndex 60) after the layers .map(), with pointerEvents:none on the frame and auto on each handle. Fix B addressed the symptom (select-all re-running on every render) by extracting an uncontrolled EditableText that focuses/selects once, but persistence was moved entirely to onBlur; because Canvas's root onPointerDown sets editingId=null, React removes the focused contentEditable node and Chrome emits no blur for removed elements, so onCommit never fires and the typed text is dropped. Secondary finding: the canvas wrapper's overflow-hidden clips the new handle overlay, so handles positioned outside the artboard are hit-tested against the toolbar instead."
+}

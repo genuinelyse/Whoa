@@ -1,0 +1,50 @@
+{
+  "summary": "Targeted verification of the corner-resize bug fix in Bannr (frontend-only, no backend). RESULT: THE BUG FIX IS VERIFIED - all four corner handles (resize-tl/tr/bl/br-<id>) now resize the selected layer for both shape and text layers, with correct opposite-corner anchoring, and text layers scale fontSize with width. Two issues found: (1) HIGH - corner handles are rendered INSIDE the layer div, so once a layer grows, handles that fall under a sibling layer higher in z-order are occluded; the pointerdown then selects the other layer and resizing becomes impossible (this exactly reproduces the 'bl does not resize' failure seen on template-t-poster). (2) HIGH - typing into a text layer at normal speed loses characters: keyboard.type('QA') on 'Add a heading' committed only 'A'; typing char-by-char with 150ms gaps produced correct 'ABCD'. Regressions all pass: layer body move (no size change), deselect on empty canvas, double-tap edit + blur commit (order correct), background swatch, timeline scrub (2.8s) and play (0.0s->1.2s), export flow (fmt-MP4/GIF/PNG + export-start -> 'Export ready' mocked). ZERO console errors / pageerrors in every run.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Canvas.tsx - corner resize handles",
+        "issue": "HIGH: handles are children of the layer div, so they inherit the layer's stacking position. Reproduced on template-t-poster: select the circle shape, drag resize-br outward ~75px; the bl and br handles then sit under the 'SAT · 8PM' text layer (document.elementFromPoint at the handle centre returns a plain DIV, not the handle). Dragging them does nothing and instead SELECTS the overlapping layer (selection is lost). Fix: render the selection frame + 4 handles in a single overlay layer above all layers inside the artboard (absolute, z-index above layers, positioned from the selected layer's x/y/w/h), or give the selected layer a raised z-index while selected.",
+        "selector": "[data-testid^=\"resize-bl-\"], [data-testid^=\"resize-br-\"]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Canvas.tsx - LayerContent contentEditable ref",
+        "issue": "HIGH (data loss): the inline `ref` callback runs select-all (range.selectNodeContents) on EVERY React render. While typing, the new selH ResizeObserver (added for the bottom handles) fires setSelH as the text box height changes, re-rendering the editor and re-selecting all content, so the next keystroke wipes everything typed so far. Repro: double-tap 'Add a heading' -> type 'QA' quickly -> committed text is 'A' (also 'HELLO QA' -> 'A'). Slow typing (150ms/char) works, which masked it. Fix: run the focus/select-all once (useEffect on mount, or a ref guard) and/or skip selH updates while editingId === layer.id.",
+        "selector": "[data-testid^=\"layer-\"] [contenteditable]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Editor / Canvas",
+        "issues": [
+          "Handle hit area is only ~21 screen px (hs*1.9); acceptable on desktop but small for touch - 32-40px hit target (transparent padding) would be better on mobile.",
+          "No aspect-ratio lock / shift modifier: shapes resize freely, so squares/circles can be distorted unintentionally (works, just noting)."
+        ]
+      }
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_3.json", "/app/test_reports/iteration_2.json"],
+  "action_items": [
+    "Move the selection outline + 4 corner handles into an overlay rendered ABOVE all layers (or raise the selected layer's z-index) so handles are never occluded by other layers.",
+    "Make the contentEditable focus/select-all run only once when entering edit mode (and/or pause the selH ResizeObserver while editing) - currently fast typing loses characters."
+  ],
+  "critical_code_review_comments": [
+    "Canvas.tsx resize math is correct: left/top flags, Math.max(20,...) clamp, opposite-corner anchoring via x = ox + (ow - w); verified numerically for all 4 corners on shape and text.",
+    "startResize correctly stopPropagation/preventDefault so the move gesture and deselect do not fire, and selection is retained - verified.",
+    "Text resize uses `ofs * (w / ow)` from the gesture-start fontSize, so repeated drags do not drift - verified (119->149->126px).",
+    "Handles are inside the layer subtree => z-order/occlusion bug (see ui_bugs). Also they are clipped/overlapped for layers near other layers; an overlay is the standard fix.",
+    "Minimum size clamp is 20 artboard px only; no max clamp to the artboard bounds, so a layer can be resized far outside the canvas with no way back except undo (undo was removed)."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (no backend)", "frontend": "Corner-resize fix: 4/4 corners PASS on shape and 4/4 on text (grow + shrink). 2 HIGH defects found (handle occlusion, fast-typing text loss). All other regression checks pass." },
+  "seed_data_creation": "None - used built-in mock templates/presets (template-t-poster, template-t-summer, preset-ig-post).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "N/A - no auth; /app/memory/test_credentials.md not present.",
+  "context_for_next_testing_agent": "Preview URL: https://d4afb135-e60c-44c7-8ebd-8c442bcd4568.preview.emergentagent.com. Resize test recipe: click template/preset -> select layer via page.locator('[data-testid=layer-<id>]').click(position={x:5,y:5}) -> mouse.down on [data-testid=resize-<corner>-<id>] and mouse.move in >=10 steps (window pointermove listeners; single jumps do not register). Measure the layer bounding box before/after. IMPORTANT: before blaming a corner, check document.elementFromPoint at the handle centre - handles get occluded by sibling layers with higher z (the occlusion bug). Real editor testids: tool-layers (not layers-btn), export-btn -> export-sheet -> fmt-MP4/GIF/PNG -> export-start -> 'Export ready' (mocked). bg swatch ids contain '#' (bg-color-#FF3B30). Scrub only on empty timeline area, not on a clip.",
+  "rca_of_the_issue": "Corner resize itself is fixed and correct. The apparent 'bl corner does not resize' failure on template-t-poster is NOT a math bug: after the shape grew, its bl/br handles moved under the full-width 'SAT · 8PM' text layer which is later in DOM order, so the pointerdown hit that layer (startMove -> select) instead of the handle. Confirmed with elementFromPoint returning a plain DIV for bl/br after growth while tl/tr still returned the handles. Separately, the fast-typing text loss is caused by the contentEditable ref callback re-running select-all on every render, which now happens mid-typing because the new selH ResizeObserver triggers state updates as the text box height changes."
+}
