@@ -289,30 +289,12 @@ export default function Canvas() {
         activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
         if (activeTouches.current.size < 2) return
 
-        // Pointer events can reach a child layer before touchstart. Lock the
-        // already-selected layer here so a second finger landing on another
-        // layer can never replace the pinch target.
+        // Touchstart is the single source of truth for pinch initialization.
+        // Pointer capture only prevents the second finger's hit-tested layer
+        // from running its selection/move handler; initializing here as well
+        // races touchstart and can intermittently fall back to canvas zoom.
         e.preventDefault()
         e.stopPropagation()
-        if (pinching.current) return
-
-        const points = [...activeTouches.current.values()].slice(0, 2)
-        const startDist = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y)
-        if (!startDist) return
-        const selected = layersRef.current.find((l) => l.id === touchSelectionLock.current)
-        if (selected && !selected.locked) {
-          select(selected.id)
-          const h = selected.type === 'text' ? (selHRef.current || selected.h) : selected.h
-          pinch.current = { mode: 'resize', id: selected.id, startDist, w0: selected.w, h0: h, x0: selected.x, y0: selected.y, fontSize: selected.fontSize || 40 }
-        } else {
-          const rect = ref.current?.getBoundingClientRect()
-          if (!rect) return
-          const v = viewRef.current
-          const mid = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 }
-          const cx = rect.left + rect.width / 2
-          const cy = rect.top + rect.height / 2
-          pinch.current = { mode: 'zoom', startDist, s0: v.scale, lx: (mid.x - cx - v.x) / v.scale, ly: (mid.y - cy - v.y) / v.scale }
-        }
         pinching.current = true
         gesture.current = null
       }}
