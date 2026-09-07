@@ -173,32 +173,6 @@ export default function Canvas() {
     const onTouchStart = (e: TouchEvent) => {
       touchCount.current = e.touches.length
       if (e.touches.length === 1) touchSelectionLock.current = selectedRef.current
-      if (e.touches.length >= 2) {
-        e.preventDefault()
-        pinching.current = true
-        gesture.current = null
-        const [t1, t2] = [e.touches[0], e.touches[1]]
-        const m = tmid(t1, t2)
-        const startDist = tdist(t1, t2)
-        const selected = layersRef.current.find((l) => l.id === touchSelectionLock.current)
-        if (selected && !selected.locked) {
-          const h = selected.type === 'text' ? (selHRef.current || selected.h) : selected.h
-          pinch.current = {
-            mode: 'resize',
-            id: selected.id,
-            startDist,
-            w0: selected.w,
-            h0: h,
-            x0: selected.x,
-            y0: selected.y,
-            fontSize: selected.fontSize || 40,
-          }
-        } else {
-          const v = viewRef.current
-          const { cx, cy } = center()
-          pinch.current = { mode: 'zoom', startDist, s0: v.scale, lx: (m.x - cx - v.x) / v.scale, ly: (m.y - cy - v.y) / v.scale }
-        }
-      }
     }
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length >= 2 && pinch.current) {
@@ -286,17 +260,31 @@ export default function Canvas() {
       className="checkerboard relative flex flex-1 touch-none items-center justify-center overflow-hidden"
       onPointerDownCapture={(e) => {
         if (e.pointerType !== 'touch') return
+        if (activeTouches.current.size === 0) touchSelectionLock.current = selectedRef.current
         activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-        if (activeTouches.current.size < 2) return
+        if (activeTouches.current.size < 2 || pinch.current) return
 
-        // Touchstart is the single source of truth for pinch initialization.
-        // Pointer capture only prevents the second finger's hit-tested layer
-        // from running its selection/move handler; initializing here as well
-        // races touchstart and can intermittently fall back to canvas zoom.
+        const points = Array.from(activeTouches.current.values())
+        const startDist = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y)
+        if (startDist < 1) return
         e.preventDefault()
         e.stopPropagation()
         pinching.current = true
         gesture.current = null
+        const selected = layersRef.current.find((l) => l.id === touchSelectionLock.current)
+        if (selected && !selected.locked) {
+          const h = selected.type === 'text' ? (selHRef.current || selected.h) : selected.h
+          pinch.current = { mode: 'resize', id: selected.id, startDist, w0: selected.w, h0: h, x0: selected.x, y0: selected.y, fontSize: selected.fontSize || 40 }
+        } else {
+          const v = viewRef.current
+          const { cx, cy } = center()
+          const mx = (points[0].x + points[1].x) / 2
+          const my = (points[0].y + points[1].y) / 2
+          pinch.current = { mode: 'zoom', startDist, s0: v.scale, lx: (mx - cx - v.x) / v.scale, ly: (my - cy - v.y) / v.scale }
+        }
+      }}
+      onPointerMoveCapture={(e) => {
+        if (e.pointerType === 'touch') activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
       }}
       onPointerUpCapture={(e) => {
         if (e.pointerType === 'touch') activeTouches.current.delete(e.pointerId)
