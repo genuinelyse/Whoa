@@ -71,6 +71,7 @@ export default function Canvas() {
   const pinch = useRef<Pinch>(null)
   const pinching = useRef(false)
   const touchCount = useRef(0)
+  const touchSelectionLock = useRef<string | null>(null)
   const activeTouches = useRef(new Map<number, { x: number; y: number }>())
   const selectedRef = useRef(selectedId)
   selectedRef.current = selectedId
@@ -171,6 +172,7 @@ export default function Canvas() {
     }
     const onTouchStart = (e: TouchEvent) => {
       touchCount.current = e.touches.length
+      if (e.touches.length === 1) touchSelectionLock.current = selectedRef.current
       if (e.touches.length >= 2) {
         e.preventDefault()
         pinching.current = true
@@ -178,7 +180,7 @@ export default function Canvas() {
         const [t1, t2] = [e.touches[0], e.touches[1]]
         const m = tmid(t1, t2)
         const startDist = tdist(t1, t2)
-        const selected = layersRef.current.find((l) => l.id === selectedRef.current)
+        const selected = layersRef.current.find((l) => l.id === touchSelectionLock.current)
         if (selected && !selected.locked) {
           const h = selected.type === 'text' ? (selHRef.current || selected.h) : selected.h
           pinch.current = {
@@ -227,6 +229,7 @@ export default function Canvas() {
     const onTouchEnd = (e: TouchEvent) => {
       touchCount.current = e.touches.length
       if (e.touches.length < 2) { pinch.current = null; pinching.current = false }
+      if (e.touches.length === 0) touchSelectionLock.current = null
     }
     const stop = (e: Event) => e.preventDefault()
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -296,8 +299,9 @@ export default function Canvas() {
         const points = [...activeTouches.current.values()].slice(0, 2)
         const startDist = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y)
         if (!startDist) return
-        const selected = layersRef.current.find((l) => l.id === selectedRef.current)
+        const selected = layersRef.current.find((l) => l.id === touchSelectionLock.current)
         if (selected && !selected.locked) {
+          select(selected.id)
           const h = selected.type === 'text' ? (selHRef.current || selected.h) : selected.h
           pinch.current = { mode: 'resize', id: selected.id, startDist, w0: selected.w, h0: h, x0: selected.x, y0: selected.y, fontSize: selected.fontSize || 40 }
         } else {
