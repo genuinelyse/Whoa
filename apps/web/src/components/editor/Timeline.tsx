@@ -102,7 +102,7 @@ export default function Timeline() {
       >
         <div className="relative" style={{ width: LABEL_W + timeToX(duration) + 40, minWidth: '100%' }}>
           {/* ruler */}
-          <div className="sticky top-0 z-10 flex h-6 items-end bg-timeline" style={{ paddingLeft: LABEL_W }}>
+          <div className="sticky top-0 z-30 flex h-8 items-end bg-timeline" style={{ paddingLeft: LABEL_W }}>
             {ticks.map((t) => (
               <div key={t} className="relative shrink-0 border-l border-line text-[10px] text-txt3" style={{ width: 1000 * ppms }}>
                 <span className="absolute left-1 -top-0 bottom-1">{t}s</span>
@@ -111,7 +111,7 @@ export default function Timeline() {
           </div>
 
           {/* rows */}
-          <div className="pb-3 pt-1">
+          <div className="pb-3 pt-2">
             {layers.length === 0 && (
               <p className="py-8 text-center text-xs text-txt3">Add elements to see them on the timeline</p>
             )}
