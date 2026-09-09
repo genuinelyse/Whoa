@@ -16,7 +16,7 @@ function fmt(ms: number) {
 }
 
 type Drag =
-  | { kind: 'scrub' }
+  | { kind: 'playhead' }
   | { kind: 'trim'; id: string; edge: 'l' | 'r'; s0: number; e0: number; sx: number }
   | null
 
@@ -39,7 +39,7 @@ export default function Timeline() {
     const move = (e: PointerEvent) => {
       const d = drag.current
       if (!d) return
-      if (d.kind === 'scrub') setTime(xToTime(e.clientX))
+      if (d.kind === 'playhead') setTime(xToTime(e.clientX))
       else {
         const dt = (e.clientX - d.sx) / ppms
         if (d.edge === 'l') updateLayer(d.id, { start: Math.max(0, Math.min(d.e0 - 200, d.s0 + dt)) })
@@ -109,7 +109,6 @@ export default function Timeline() {
       <div
         ref={trackRef}
         className="relative h-40 overflow-auto no-scrollbar"
-        onPointerDown={(e) => { drag.current = { kind: 'scrub' }; setTime(xToTime(e.clientX)) }}
       >
         <div className="relative" style={{ width: LABEL_W + timeToX(duration) + 40, minWidth: '100%' }}>
           {/* rows */}
@@ -125,9 +124,20 @@ export default function Timeline() {
           </div>
 
           {/* playhead */}
-          <div className="pointer-events-none absolute top-0 bottom-0 z-20" style={{ left: LABEL_W + timeToX(time) }} data-testid="playhead">
-            <div className="absolute -left-1.5 -top-0 h-3 w-3 rounded-sm bg-white" />
-            <div className="h-full w-0.5 bg-white" />
+          <div className="pointer-events-none absolute inset-y-0 left-0 z-20" data-testid="playhead">
+            <div
+              className="pointer-events-auto absolute -top-1 h-4 w-4 -translate-x-1/2 cursor-ew-resize rounded-sm bg-white shadow-sm"
+              style={{ left: LABEL_W + timeToX(time), touchAction: 'none' }}
+              onPointerDown={(e) => {
+                e.stopPropagation()
+                drag.current = { kind: 'playhead' }
+                setTime(xToTime(e.clientX))
+              }}
+              aria-label="Drag timeline playhead"
+              role="slider"
+              tabIndex={0}
+            />
+            <div className="absolute top-0 bottom-0 w-0.5 bg-white" style={{ left: LABEL_W + timeToX(time) }} />
           </div>
         </div>
       </div>
