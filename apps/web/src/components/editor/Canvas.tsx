@@ -175,7 +175,27 @@ export default function Canvas() {
     }
     const onTouchStart = (e: TouchEvent) => {
       touchCount.current = e.touches.length
-      if (e.touches.length === 1) touchSelectionLock.current = selectedRef.current
+      if (e.touches.length === 1) {
+        touchSelectionLock.current = selectedRef.current
+        return
+      }
+      if (e.touches.length === 2) {
+        e.preventDefault()
+        const [t1, t2] = [e.touches[0], e.touches[1]]
+        const m = tmid(t1, t2)
+        const v = viewRef.current
+        const { cx, cy } = center()
+        pinch.current = {
+          mode: 'zoom',
+          startDist: tdist(t1, t2),
+          s0: v.scale,
+          lx: (m.x - cx - v.x) / v.scale,
+          ly: (m.y - cy - v.y) / v.scale,
+        }
+        pinching.current = true
+        gesture.current = null
+        panGesture.current = null
+      }
     }
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length >= 2 && pinch.current) {
