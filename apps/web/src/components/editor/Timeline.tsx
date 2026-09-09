@@ -57,40 +57,51 @@ export default function Timeline() {
 
   return (
     <div className="shrink-0 border-t border-line bg-timeline" data-testid="timeline">
-      {/* controls */}
-      <div className="flex h-11 items-center gap-2 px-3">
-        <button
-          onClick={() => setPlaying(!playing)}
-          data-testid="play-btn"
-          className="grid h-8 w-8 place-items-center rounded-full bg-white text-black transition-transform active:scale-90"
-        >
-          {playing ? <Pause className="h-4 w-4" fill="black" /> : <Play className="h-4 w-4" fill="black" />}
-        </button>
-        <span className="font-mono text-xs tabular-nums text-txt2" data-testid="time-display">
-          {fmt(time)} <span className="text-txt3">/ {fmt(duration)}</span>
-        </span>
-        <div className="ml-auto flex items-center gap-1">
-          <button data-testid="split-btn" disabled className="grid h-8 w-8 place-items-center rounded-lg text-txt3 opacity-40" title="Split (coming with backend)">
-            <Scissors className="h-4 w-4" />
-          </button>
+      {/* controls and ruler */}
+      <div className="h-16 bg-timeline">
+        <div className="flex h-11 items-center gap-2 px-3">
           <button
-            data-testid="keyframe-btn"
-            onClick={() => {
-              if (!selectedId) return
-              const l = project.layers.find((x) => x.id === selectedId)
-              if (l) updateLayer(selectedId, { start: Math.min(time, l.end - 200) })
-            }}
-            className="grid h-8 w-8 place-items-center rounded-lg text-txt2 active:bg-surface2"
-            title="Set clip start to playhead"
+            onClick={() => setPlaying(!playing)}
+            data-testid="play-btn"
+            className="grid h-8 w-8 place-items-center rounded-full bg-white text-black transition-transform active:scale-90"
           >
-            <Diamond className="h-4 w-4" />
+            {playing ? <Pause className="h-4 w-4" fill="black" /> : <Play className="h-4 w-4" fill="black" />}
           </button>
-          <button data-testid="zoom-out" onClick={() => setPpms((p) => Math.max(0.03, p - 0.03))} className="grid h-8 w-8 place-items-center rounded-lg text-txt2 active:bg-surface2">
-            <ZoomOut className="h-4 w-4" />
-          </button>
-          <button data-testid="zoom-in" onClick={() => setPpms((p) => Math.min(0.4, p + 0.03))} className="grid h-8 w-8 place-items-center rounded-lg text-txt2 active:bg-surface2">
-            <ZoomIn className="h-4 w-4" />
-          </button>
+          <span className="font-mono text-xs tabular-nums text-txt2" data-testid="time-display">
+            {fmt(time)} <span className="text-txt3">/ {fmt(duration)}</span>
+          </span>
+          <div className="ml-auto flex items-center gap-1">
+            <button data-testid="split-btn" disabled className="grid h-8 w-8 place-items-center rounded-lg text-txt3 opacity-40" title="Split (coming with backend)">
+              <Scissors className="h-4 w-4" />
+            </button>
+            <button
+              data-testid="keyframe-btn"
+              onClick={() => {
+                if (!selectedId) return
+                const l = project.layers.find((x) => x.id === selectedId)
+                if (l) updateLayer(selectedId, { start: Math.min(time, l.end - 200) })
+              }}
+              className="grid h-8 w-8 place-items-center rounded-lg text-txt2 active:bg-surface2"
+              title="Set clip start to playhead"
+            >
+              <Diamond className="h-4 w-4" />
+            </button>
+            <button data-testid="zoom-out" onClick={() => setPpms((p) => Math.max(0.03, p - 0.03))} className="grid h-8 w-8 place-items-center rounded-lg text-txt2 active:bg-surface2">
+              <ZoomOut className="h-4 w-4" />
+            </button>
+            <button data-testid="zoom-in" onClick={() => setPpms((p) => Math.min(0.4, p + 0.03))} className="grid h-8 w-8 place-items-center rounded-lg text-txt2 active:bg-surface2">
+              <ZoomIn className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <div className="flex h-5 items-start overflow-hidden pl-3" aria-label="Timeline seconds">
+          <div className="flex shrink-0" style={{ paddingLeft: LABEL_W - 12 }}>
+            {ticks.map((t) => (
+              <div key={t} className="relative shrink-0 border-l border-line text-[10px] text-txt3" style={{ width: 1000 * ppms }}>
+                <span className="absolute left-1 top-0">{t}s</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -101,15 +112,6 @@ export default function Timeline() {
         onPointerDown={(e) => { drag.current = { kind: 'scrub' }; setTime(xToTime(e.clientX)) }}
       >
         <div className="relative" style={{ width: LABEL_W + timeToX(duration) + 40, minWidth: '100%' }}>
-          {/* ruler */}
-          <div className="sticky top-0 z-30 flex h-8 items-end bg-timeline" style={{ paddingLeft: LABEL_W }}>
-            {ticks.map((t) => (
-              <div key={t} className="relative shrink-0 border-l border-line text-[10px] text-txt3" style={{ width: 1000 * ppms }}>
-                <span className="absolute left-1 -top-0 bottom-1">{t}s</span>
-              </div>
-            ))}
-          </div>
-
           {/* rows */}
           <div className="pb-3 pt-2">
             {layers.length === 0 && (
