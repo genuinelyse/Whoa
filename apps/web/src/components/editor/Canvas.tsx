@@ -268,7 +268,7 @@ export default function Canvas() {
   return (
     <div
       ref={ref}
-      className="checkerboard relative flex min-h-0 min-w-0 flex-1 touch-none items-center justify-center overflow-visible"
+      className="checkerboard relative z-0 flex min-h-0 min-w-0 flex-1 touch-none items-center justify-center overflow-hidden"
       onPointerDownCapture={(e) => {
         if (e.pointerType !== 'touch') return
         if (activeTouches.current.size === 0) touchSelectionLock.current = selectedRef.current
@@ -318,6 +318,7 @@ export default function Canvas() {
         }
         if (!selectedId && (e.pointerType === 'mouse' ? e.button === 0 : true)) {
           e.preventDefault()
+          e.currentTarget.setPointerCapture(e.pointerId)
           const v = viewRef.current
           panGesture.current = { sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, moved: false }
           return
