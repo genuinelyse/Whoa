@@ -182,15 +182,31 @@ export default function Canvas() {
       if (e.touches.length === 2) {
         e.preventDefault()
         const [t1, t2] = [e.touches[0], e.touches[1]]
-        const m = tmid(t1, t2)
-        const v = viewRef.current
-        const { cx, cy } = center()
-        pinch.current = {
-          mode: 'zoom',
-          startDist: tdist(t1, t2),
-          s0: v.scale,
-          lx: (m.x - cx - v.x) / v.scale,
-          ly: (m.y - cy - v.y) / v.scale,
+        const startDist = tdist(t1, t2)
+        const selected = layersRef.current.find((l) => l.id === touchSelectionLock.current)
+        if (selected && !selected.locked) {
+          const h = selected.type === 'text' ? (selHRef.current || selected.h) : selected.h
+          pinch.current = {
+            mode: 'resize',
+            id: selected.id,
+            startDist,
+            w0: selected.w,
+            h0: h,
+            x0: selected.x,
+            y0: selected.y,
+            fontSize: selected.fontSize || 40,
+          }
+        } else {
+          const m = tmid(t1, t2)
+          const v = viewRef.current
+          const { cx, cy } = center()
+          pinch.current = {
+            mode: 'zoom',
+            startDist,
+            s0: v.scale,
+            lx: (m.x - cx - v.x) / v.scale,
+            ly: (m.y - cy - v.y) / v.scale,
+          }
         }
         pinching.current = true
         gesture.current = null
