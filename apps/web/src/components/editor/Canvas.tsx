@@ -103,14 +103,9 @@ export default function Canvas() {
       const eff = scale * viewRef.current.scale
       const dx = (e.clientX - g.sx) / eff
       const dy = (e.clientY - g.sy) / eff
-      const PW = preset.w
-      const PH = preset.h
-      const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi))
       if (g.mode === 'move') {
         if (Math.abs(e.clientX - g.sx) > 3 || Math.abs(e.clientY - g.sy) > 3) g.moved = true
-        const x = clamp(g.ox + dx, 0, Math.max(0, PW - g.ow))
-        const y = clamp(g.oy + dy, 0, Math.max(0, PH - g.oh))
-        updateLayer(g.id, { x, y })
+        updateLayer(g.id, { x: g.ox + dx, y: g.oy + dy })
         return
       }
       // resize from a corner
@@ -118,12 +113,10 @@ export default function Canvas() {
       const top = g.corner === 'tl' || g.corner === 'tr'
       let w = left ? g.ow - dx : g.ow + dx
       let h = top ? g.oh - dy : g.oh + dy
-      w = Math.min(Math.max(20, w), PW)
-      h = Math.min(Math.max(20, h), PH)
-      let x = left ? g.ox + (g.ow - w) : g.ox
-      let y = top ? g.oy + (g.oh - h) : g.oy
-      x = clamp(x, 0, Math.max(0, PW - w))
-      y = clamp(y, 0, Math.max(0, PH - h))
+      w = Math.max(20, w)
+      h = Math.max(20, h)
+      const x = left ? g.ox + (g.ow - w) : g.ox
+      const y = top ? g.oy + (g.oh - h) : g.oy
       if (g.isText) {
         const fontSize = Math.max(6, Math.round(g.ofs * (w / g.ow)))
         updateLayer(g.id, { x, y, w, fontSize })
@@ -142,7 +135,7 @@ export default function Canvas() {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
     }
-  }, [scale, updateLayer, preset.w, preset.h])
+  }, [scale, updateLayer])
 
   // Pinch-to-zoom / pan on the canvas only (prevents whole-page zoom)
   useEffect(() => {
@@ -183,10 +176,10 @@ export default function Canvas() {
         if (p.mode === 'resize') {
           const selected = layersRef.current.find((l) => l.id === p.id)
           if (!selected) return
-          const w = clampN(p.w0 * ratio, 20, preset.w)
-          const h = clampN(p.h0 * ratio, 20, preset.h)
-          const x = clampN(p.x0 + (p.w0 - w) / 2, 0, Math.max(0, preset.w - w))
-          const y = clampN(p.y0 + (p.h0 - h) / 2, 0, Math.max(0, preset.h - h))
+          const w = Math.max(20, p.w0 * ratio)
+          const h = Math.max(20, p.h0 * ratio)
+          const x = p.x0 + (p.w0 - w) / 2
+          const y = p.y0 + (p.h0 - h) / 2
           if (selected.type === 'text') {
             updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratio)) })
           } else {
@@ -265,7 +258,7 @@ export default function Canvas() {
   return (
     <div
       ref={ref}
-      className="checkerboard relative flex flex-1 touch-none items-center justify-center overflow-hidden"
+      className="checkerboard relative flex min-h-0 min-w-0 flex-1 touch-none items-center justify-center overflow-visible"
       onPointerDownCapture={(e) => {
         if (e.pointerType !== 'touch') return
         if (activeTouches.current.size === 0) touchSelectionLock.current = selectedRef.current
