@@ -63,6 +63,7 @@ export default function Canvas() {
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
   const gesture = useRef<Gesture>(null)
+  const panGesture = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean }>(null)
   const selRef = useRef<HTMLDivElement>(null)
   const [selH, setSelH] = useState(0)
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
@@ -98,6 +99,14 @@ export default function Canvas() {
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
+      const pan = panGesture.current
+      if (pan) {
+        const dx = e.clientX - pan.sx
+        const dy = e.clientY - pan.sy
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) pan.moved = true
+        setView((v) => ({ ...v, x: pan.ox + dx, y: pan.oy + dy }))
+        return
+      }
       const g = gesture.current
       if (!g || !scale) return
       const eff = scale * viewRef.current.scale
@@ -128,6 +137,7 @@ export default function Canvas() {
       const g = gesture.current
       if (g?.mode === 'move' && g.fromCanvas && !g.moved) select(null)
       gesture.current = null
+      panGesture.current = null
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -305,6 +315,12 @@ export default function Canvas() {
             gesture.current = { id: selected.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: selected.x, oy: selected.y, ow: selected.w, oh: selected.h, fromCanvas: true, moved: false }
             return
           }
+        }
+        if (!selectedId && (e.pointerType === 'mouse' ? e.button === 0 : true)) {
+          e.preventDefault()
+          const v = viewRef.current
+          panGesture.current = { sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, moved: false }
+          return
         }
         select(null)
         setEditingId(null)
