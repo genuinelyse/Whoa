@@ -145,8 +145,7 @@ export default function Canvas() {
         longPress.current = null
       }
       const g = gesture.current
-      if (g?.mode === 'move' && g.fromCanvas && !g.moved) {
-        multiSelectMode.current = false
+      if (g?.mode === 'move' && g.fromCanvas && !g.moved && !multiSelectMode.current) {
         select(null)
       }
       gesture.current = null
@@ -374,7 +373,7 @@ export default function Canvas() {
         if (pinching.current || (e.pointerType === 'touch' && (touchCount.current >= 2 || activeTouches.current.size > 1))) return
         if (e.pointerType === 'touch' && selectedId) {
           const selected = project.layers.find((l) => l.id === selectedId)
-          if (selected && !selected.locked && editingId !== selected.id) {
+          if (!multiSelectMode.current && selected && !selected.locked && editingId !== selected.id) {
             e.preventDefault()
             gesture.current = { id: selected.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: selected.x, oy: selected.y, ow: selected.w, oh: selected.h, fromCanvas: true, moved: false }
             return
@@ -408,6 +407,7 @@ export default function Canvas() {
                 key={l.id}
                 ref={isSel ? selRef : undefined}
           onTouchStart={(e) => {
+            e.stopPropagation()
             if (l.locked || editingId === l.id) return
             if (multiSelectMode.current) {
               select(l.id, true)
