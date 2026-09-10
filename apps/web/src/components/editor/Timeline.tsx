@@ -124,10 +124,10 @@ export default function Timeline() {
           </div>
 
           {/* playhead */}
-          <div className="pointer-events-none absolute inset-y-0 left-0 z-20" data-testid="playhead">
+          <div className="pointer-events-none absolute inset-y-0 z-20" style={{ left: LABEL_W }} data-testid="playhead">
             <div
               className="pointer-events-auto absolute -top-1 h-4 w-4 -translate-x-1/2 cursor-ew-resize rounded-sm bg-white shadow-sm"
-              style={{ left: LABEL_W + timeToX(time), touchAction: 'none' }}
+              style={{ left: timeToX(time), touchAction: 'none' }}
               onPointerDown={(e) => {
                 e.stopPropagation()
                 drag.current = { kind: 'playhead' }
@@ -137,7 +137,7 @@ export default function Timeline() {
               role="slider"
               tabIndex={0}
             />
-            <div className="absolute top-0 bottom-0 w-0.5 bg-white" style={{ left: LABEL_W + timeToX(time) }} />
+            <div className="absolute top-0 bottom-0 w-0.5 bg-white" style={{ left: timeToX(time) }} />
           </div>
         </div>
       </div>

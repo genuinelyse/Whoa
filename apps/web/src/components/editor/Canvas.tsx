@@ -427,7 +427,7 @@ export default function Canvas() {
                     style={{
                       position: 'absolute',
                       left: cx - size / 2,
-                      top: cy - size / 2,
+                      top: cy === bh ? bh - size / 2 : cy - size / 2,
                       width: size,
                       height: size,
                       display: 'grid',
