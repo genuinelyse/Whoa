@@ -49,19 +49,20 @@ const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.cl
 
 type Corner = 'tl' | 'tr' | 'bl' | 'br'
 type Gesture =
-  | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean }
+  | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean; group?: { id: string; x: number; y: number }[] }
   | { id: string; mode: 'resize'; corner: Corner; isText: boolean; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; ofs: number }
   | null
 
 type Pinch =
   | { mode: 'zoom'; startDist: number; s0: number; lx: number; ly: number }
-  | { mode: 'resize'; id: string; startDist: number; w0: number; h0: number; x0: number; y0: number; fontSize: number }
+  | { mode: 'resize'; id: string; startDist: number; w0: number; h0: number; x0: number; y0: number; fontSize: number; group?: { id: string; x: number; y: number; w: number; h: number }[] }
   | null
 
 export default function Canvas() {
-  const { project, selectedId, select, updateLayer, time, mode, playing } = useEditor()
+  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing } = useEditor()
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
+  const longPress = useRef<number | null>(null)
   const gesture = useRef<Gesture>(null)
   const panGesture = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean }>(null)
   const selRef = useRef<HTMLDivElement>(null)
@@ -114,7 +115,11 @@ export default function Canvas() {
       const dy = (e.clientY - g.sy) / eff
       if (g.mode === 'move') {
         if (Math.abs(e.clientX - g.sx) > 3 || Math.abs(e.clientY - g.sy) > 3) g.moved = true
-        updateLayer(g.id, { x: g.ox + dx, y: g.oy + dy })
+        if (g.group) {
+          for (const item of g.group) updateLayer(item.id, { x: item.x + dx, y: item.y + dy })
+        } else {
+          updateLayer(g.id, { x: g.ox + dx, y: g.oy + dy })
+        }
         return
       }
       // resize from a corner
@@ -134,6 +139,10 @@ export default function Canvas() {
       }
     }
     const up = () => {
+      if (longPress.current) {
+        window.clearTimeout(longPress.current)
+        longPress.current = null
+      }
       const g = gesture.current
       if (g?.mode === 'move' && g.fromCanvas && !g.moved) select(null)
       gesture.current = null
@@ -195,6 +204,7 @@ export default function Canvas() {
             x0: selected.x,
             y0: selected.y,
             fontSize: selected.fontSize || 40,
+            group: selectedIds.length > 1 ? layersRef.current.filter((item) => selectedIds.includes(item.id)).map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h })) : undefined,
           }
         } else {
           const m = tmid(t1, t2)
@@ -222,14 +232,21 @@ export default function Canvas() {
         if (p.mode === 'resize') {
           const selected = layersRef.current.find((l) => l.id === p.id)
           if (!selected) return
-          const w = Math.max(20, p.w0 * ratio)
-          const h = Math.max(20, p.h0 * ratio)
-          const x = p.x0 + (p.w0 - w) / 2
-          const y = p.y0 + (p.h0 - h) / 2
-          if (selected.type === 'text') {
-            updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratio)) })
+          if (p.group) {
+            const cx = p.group.reduce((sum, item) => sum + item.x + item.w / 2, 0) / p.group.length
+            const cy = p.group.reduce((sum, item) => sum + item.y + item.h / 2, 0) / p.group.length
+            for (const item of p.group) {
+              const w = Math.max(20, item.w * ratio)
+              const h = Math.max(20, item.h * ratio)
+              updateLayer(item.id, { x: cx + (item.x + item.w / 2 - cx) * ratio - w / 2, y: cy + (item.y + item.h / 2 - cy) * ratio - h / 2, w, h })
+            }
           } else {
-            updateLayer(p.id, { x, y, w, h })
+            const w = Math.max(20, p.w0 * ratio)
+            const h = Math.max(20, p.h0 * ratio)
+            const x = p.x0 + (p.w0 - w) / 2
+            const y = p.y0 + (p.h0 - h) / 2
+            if (selected.type === 'text') updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratio)) })
+            else updateLayer(p.id, { x, y, w, h })
           }
           return
         }
@@ -277,8 +294,18 @@ export default function Canvas() {
           (touchSelectionLock.current !== null && touchSelectionLock.current !== l.id)))
     ) return
     e.stopPropagation()
-    select(l.id)
-    gesture.current = { id: l.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: l.h, fromCanvas: false, moved: false }
+    if (e.pointerType === 'touch') {
+      if (longPress.current) window.clearTimeout(longPress.current)
+      longPress.current = window.setTimeout(() => {
+        toggleSelect(l.id)
+        longPress.current = null
+      }, 500)
+    }
+    if (!selectedIds.includes(l.id)) select(l.id)
+    const group = selectedIds.length > 1 && selectedIds.includes(l.id)
+      ? project.layers.filter((item) => selectedIds.includes(item.id)).map((item) => ({ id: item.id, x: item.x, y: item.y }))
+      : undefined
+    gesture.current = { id: l.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: l.h, fromCanvas: false, moved: false, group }
   }
   const startResize = (e: React.PointerEvent, l: Layer, corner: Corner, boxH: number) => {
     if (pinching.current) return
@@ -374,7 +401,7 @@ export default function Canvas() {
           {project.layers.map((l) => {
             const a = anim(l, time, active)
             if (!l.visible || a.hidden) return null
-            const isSel = l.id === selectedId
+            const isSel = selectedIds.includes(l.id)
             return (
               <div
                 key={l.id}
