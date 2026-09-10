@@ -63,6 +63,7 @@ export default function Canvas() {
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
   const longPress = useRef<number | null>(null)
+  const multiSelectMode = useRef(false)
   const gesture = useRef<Gesture>(null)
   const panGesture = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean }>(null)
   const selRef = useRef<HTMLDivElement>(null)
@@ -144,7 +145,10 @@ export default function Canvas() {
         longPress.current = null
       }
       const g = gesture.current
-      if (g?.mode === 'move' && g.fromCanvas && !g.moved) select(null)
+      if (g?.mode === 'move' && g.fromCanvas && !g.moved) {
+        multiSelectMode.current = false
+        select(null)
+      }
       gesture.current = null
       panGesture.current = null
     }
@@ -295,14 +299,20 @@ export default function Canvas() {
     ) return
     e.stopPropagation()
     if (e.pointerType === 'touch') {
-      if (longPress.current) window.clearTimeout(longPress.current)
-      longPress.current = window.setTimeout(() => {
-        // Long-press enters multi-select without removing the pressed layer.
+      if (multiSelectMode.current) {
         select(l.id, true)
-        longPress.current = null
-      }, 500)
-    }
-    if (!selectedIds.includes(l.id)) select(l.id)
+      } else {
+        if (longPress.current) window.clearTimeout(longPress.current)
+        longPress.current = window.setTimeout(() => {
+          // Keep the pressed layer selected and switch subsequent taps to additive selection.
+          multiSelectMode.current = true
+          select(l.id, true)
+          gesture.current = null
+          longPress.current = null
+        }, 500)
+        if (!selectedIds.includes(l.id)) select(l.id)
+      }
+    } else if (!selectedIds.includes(l.id)) select(l.id)
     const group = selectedIds.length > 1 && selectedIds.includes(l.id)
       ? project.layers.filter((item) => selectedIds.includes(item.id)).map((item) => ({ id: item.id, x: item.x, y: item.y }))
       : undefined
