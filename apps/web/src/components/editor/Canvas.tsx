@@ -300,19 +300,8 @@ export default function Canvas() {
     e.stopPropagation()
     if (e.pointerType === 'touch') {
       e.currentTarget.setPointerCapture?.(e.pointerId)
-      if (multiSelectMode.current) {
-        select(l.id, true)
-      } else {
-        if (longPress.current) window.clearTimeout(longPress.current)
-        longPress.current = window.setTimeout(() => {
-          // Keep the pressed layer selected and switch subsequent taps to additive selection.
-          multiSelectMode.current = true
-          select(l.id, true)
-          gesture.current = null
-          longPress.current = null
-        }, 650)
-        if (!selectedIds.includes(l.id)) select(l.id)
-      }
+      if (multiSelectMode.current) select(l.id, true)
+      else if (!selectedIds.includes(l.id)) select(l.id)
     } else if (!selectedIds.includes(l.id)) select(l.id)
     const group = selectedIds.length > 1 && selectedIds.includes(l.id)
       ? project.layers.filter((item) => selectedIds.includes(item.id)).map((item) => ({ id: item.id, x: item.x, y: item.y }))
@@ -418,6 +407,20 @@ export default function Canvas() {
               <div
                 key={l.id}
                 ref={isSel ? selRef : undefined}
+          onTouchStart={(e) => {
+            if (l.locked || editingId === l.id) return
+            if (multiSelectMode.current) {
+              select(l.id, true)
+              return
+            }
+            if (longPress.current) window.clearTimeout(longPress.current)
+            longPress.current = window.setTimeout(() => {
+              multiSelectMode.current = true
+              select(l.id, true)
+              gesture.current = null
+              longPress.current = null
+            }, 600)
+          }}
           onPointerDown={(e) => startMove(e, l)}
           onContextMenu={(e) => {
             if (multiSelectMode.current) {
@@ -437,8 +440,10 @@ export default function Canvas() {
                   height: l.type === 'text' ? 'auto' : l.h,
                   opacity: a.opacity,
                   transform: a.transform,
-                  outline: isSel ? `${2 / eff}px solid #007AFF` : 'none',
+                  outline: isSel ? `${2 / eff}px solid ${multiSelectMode.current ? '#4B1D6B' : '#007AFF'}` : 'none',
+                  outlineOffset: multiSelectMode.current ? 2 / eff : 0,
                   cursor: l.locked ? 'default' : 'move',
+                  touchAction: 'none',
                 }}
               >
                 <LayerContent
