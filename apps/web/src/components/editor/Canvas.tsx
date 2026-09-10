@@ -59,7 +59,7 @@ type Pinch =
   | null
 
 export default function Canvas() {
-  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing } = useEditor()
+  const { project, selectedId, selectedIds, select, updateLayer, time, mode, playing } = useEditor()
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
   const longPress = useRef<number | null>(null)
@@ -297,7 +297,8 @@ export default function Canvas() {
     if (e.pointerType === 'touch') {
       if (longPress.current) window.clearTimeout(longPress.current)
       longPress.current = window.setTimeout(() => {
-        toggleSelect(l.id)
+        // Long-press enters multi-select without removing the pressed layer.
+        select(l.id, true)
         longPress.current = null
       }, 500)
     }
