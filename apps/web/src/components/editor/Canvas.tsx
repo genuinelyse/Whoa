@@ -299,6 +299,7 @@ export default function Canvas() {
     ) return
     e.stopPropagation()
     if (e.pointerType === 'touch') {
+      e.currentTarget.setPointerCapture?.(e.pointerId)
       if (multiSelectMode.current) {
         select(l.id, true)
       } else {
@@ -309,7 +310,7 @@ export default function Canvas() {
           select(l.id, true)
           gesture.current = null
           longPress.current = null
-        }, 500)
+        }, 650)
         if (!selectedIds.includes(l.id)) select(l.id)
       }
     } else if (!selectedIds.includes(l.id)) select(l.id)
@@ -417,8 +418,16 @@ export default function Canvas() {
               <div
                 key={l.id}
                 ref={isSel ? selRef : undefined}
-                onPointerDown={(e) => startMove(e, l)}
-                onDoubleClick={(e) => { e.stopPropagation(); if (l.type === 'text') setEditingId(l.id) }}
+          onPointerDown={(e) => startMove(e, l)}
+          onContextMenu={(e) => {
+            if (multiSelectMode.current) {
+              e.preventDefault()
+              e.stopPropagation()
+              multiSelectMode.current = true
+              select(l.id, true)
+            }
+          }}
+          onDoubleClick={(e) => { e.stopPropagation(); if (l.type === 'text') setEditingId(l.id) }}
                 data-testid={`layer-${l.id}`}
                 style={{
                   position: 'absolute',
