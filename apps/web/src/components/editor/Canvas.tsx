@@ -189,6 +189,12 @@ export default function Canvas() {
     }
     const onTouchStart = (e: TouchEvent) => {
       touchCount.current = e.touches.length
+      if (e.touches.length >= 2) {
+        if (longPress.current) {
+          window.clearTimeout(longPress.current)
+          longPress.current = null
+        }
+      }
       if (e.touches.length === 1) {
         touchSelectionLock.current = selectedRef.current
         return
