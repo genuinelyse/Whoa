@@ -62,8 +62,10 @@ export default function Canvas() {
   const { project, selectedId, selectedIds, select, updateLayer, time, mode, playing } = useEditor()
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [multiSelectMode, setMultiSelectMode] = useState(false)
   const longPress = useRef<number | null>(null)
-  const multiSelectMode = useRef(false)
+  const multiSelectModeRef = useRef(false)
+  multiSelectModeRef.current = multiSelectMode
   const gesture = useRef<Gesture>(null)
   const panGesture = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean }>(null)
   const selRef = useRef<HTMLDivElement>(null)
@@ -145,7 +147,7 @@ export default function Canvas() {
         longPress.current = null
       }
       const g = gesture.current
-      if (g?.mode === 'move' && g.fromCanvas && !g.moved && !multiSelectMode.current) {
+      if (g?.mode === 'move' && g.fromCanvas && !g.moved && !multiSelectModeRef.current) {
         select(null)
       }
       gesture.current = null
@@ -299,7 +301,7 @@ export default function Canvas() {
     e.stopPropagation()
     if (e.pointerType === 'touch') {
       e.currentTarget.setPointerCapture?.(e.pointerId)
-      if (multiSelectMode.current) select(l.id, true)
+      if (multiSelectModeRef.current) select(l.id, true)
       else if (!selectedIds.includes(l.id)) select(l.id)
     } else if (!selectedIds.includes(l.id)) select(l.id)
     const group = selectedIds.length > 1 && selectedIds.includes(l.id)
@@ -373,7 +375,7 @@ export default function Canvas() {
         if (pinching.current || (e.pointerType === 'touch' && (touchCount.current >= 2 || activeTouches.current.size > 1))) return
         if (e.pointerType === 'touch' && selectedId) {
           const selected = project.layers.find((l) => l.id === selectedId)
-          if (!multiSelectMode.current && selected && !selected.locked && editingId !== selected.id) {
+          if (!multiSelectModeRef.current && selected && !selected.locked && editingId !== selected.id) {
             e.preventDefault()
             gesture.current = { id: selected.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: selected.x, oy: selected.y, ow: selected.w, oh: selected.h, fromCanvas: true, moved: false }
             return
@@ -386,6 +388,8 @@ export default function Canvas() {
           panGesture.current = { sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, moved: false }
           return
         }
+        setMultiSelectMode(false)
+        multiSelectModeRef.current = false
         select(null)
         setEditingId(null)
       }}
@@ -409,13 +413,14 @@ export default function Canvas() {
           onTouchStart={(e) => {
             e.stopPropagation()
             if (l.locked || editingId === l.id) return
-            if (multiSelectMode.current) {
+            if (multiSelectModeRef.current) {
               select(l.id, true)
               return
             }
             if (longPress.current) window.clearTimeout(longPress.current)
             longPress.current = window.setTimeout(() => {
-              multiSelectMode.current = true
+              setMultiSelectMode(true)
+              multiSelectModeRef.current = true
               select(l.id, true)
               gesture.current = null
               longPress.current = null
@@ -423,10 +428,11 @@ export default function Canvas() {
           }}
           onPointerDown={(e) => startMove(e, l)}
           onContextMenu={(e) => {
-            if (multiSelectMode.current) {
+            if (multiSelectModeRef.current) {
               e.preventDefault()
               e.stopPropagation()
-              multiSelectMode.current = true
+              setMultiSelectMode(true)
+              multiSelectModeRef.current = true
               select(l.id, true)
             }
           }}
@@ -440,8 +446,8 @@ export default function Canvas() {
                   height: l.type === 'text' ? 'auto' : l.h,
                   opacity: a.opacity,
                   transform: a.transform,
-                  outline: isSel ? `${2 / eff}px solid ${multiSelectMode.current ? '#4B1D6B' : '#007AFF'}` : 'none',
-                  outlineOffset: multiSelectMode.current ? 2 / eff : 0,
+                  outline: isSel ? `${2 / eff}px solid ${multiSelectMode ? '#4B1D6B' : '#007AFF'}` : 'none',
+                  outlineOffset: multiSelectModeRef.current ? 2 / eff : 0,
                   cursor: l.locked ? 'default' : 'move',
                   touchAction: 'none',
                 }}
