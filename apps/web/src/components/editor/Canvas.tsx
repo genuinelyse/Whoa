@@ -66,6 +66,7 @@ export default function Canvas() {
   const [pinchActive, setPinchActive] = useState(false)
   const longPress = useRef<number | null>(null)
   const pendingMultiSelectTap = useRef<number | null>(null)
+  const pinchTouchSequence = useRef(false)
   const multiSelectModeRef = useRef(false)
   multiSelectModeRef.current = multiSelectMode
   const gesture = useRef<Gesture>(null)
@@ -192,6 +193,7 @@ export default function Canvas() {
     const onTouchStart = (e: TouchEvent) => {
       touchCount.current = e.touches.length
       if (e.touches.length >= 2) {
+        pinchTouchSequence.current = true
         if (longPress.current) {
           window.clearTimeout(longPress.current)
           longPress.current = null
@@ -200,6 +202,7 @@ export default function Canvas() {
           window.clearTimeout(pendingMultiSelectTap.current)
           pendingMultiSelectTap.current = null
         }
+
       }
       if (e.touches.length === 1) {
         touchSelectionLock.current = selectedRef.current
@@ -281,7 +284,10 @@ export default function Canvas() {
         pinching.current = false
         setPinchActive(false)
       }
-      if (e.touches.length === 0) touchSelectionLock.current = null
+      if (e.touches.length === 0) {
+        touchSelectionLock.current = null
+        pinchTouchSequence.current = false
+      }
     }
     const stop = (e: Event) => e.preventDefault()
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -311,7 +317,7 @@ export default function Canvas() {
       editingId === l.id ||
       pinching.current ||
       (e.pointerType === 'touch' &&
-        (touchCount.current >= 2 ||
+        (pinchTouchSequence.current || touchCount.current >= 2 ||
           activeTouches.current.size > 1 ||
           (touchSelectionLock.current !== null && touchSelectionLock.current !== l.id)))
     ) return
@@ -366,6 +372,7 @@ export default function Canvas() {
         e.preventDefault()
         e.stopPropagation()
         pinching.current = true
+        pinchTouchSequence.current = true
         gesture.current = null
         const selected = layersRef.current.find((l) => l.id === touchSelectionLock.current)
         if (selected && !selected.locked) {
@@ -383,10 +390,16 @@ export default function Canvas() {
         if (e.pointerType === 'touch') activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
       }}
       onPointerUpCapture={(e) => {
-        if (e.pointerType === 'touch') activeTouches.current.delete(e.pointerId)
+        if (e.pointerType === 'touch') {
+          activeTouches.current.delete(e.pointerId)
+          if (activeTouches.current.size === 0) pinchTouchSequence.current = false
+        }
       }}
       onPointerCancelCapture={(e) => {
-        if (e.pointerType === 'touch') activeTouches.current.delete(e.pointerId)
+        if (e.pointerType === 'touch') {
+          activeTouches.current.delete(e.pointerId)
+          if (activeTouches.current.size === 0) pinchTouchSequence.current = false
+        }
       }}
       onPointerDown={(e) => {
         // The second touch belongs to the active pinch. A first touch on the
