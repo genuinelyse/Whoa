@@ -64,6 +64,7 @@ export default function Canvas() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [multiSelectMode, setMultiSelectMode] = useState(false)
   const longPress = useRef<number | null>(null)
+  const pendingMultiSelectTap = useRef<number | null>(null)
   const multiSelectModeRef = useRef(false)
   multiSelectModeRef.current = multiSelectMode
   const gesture = useRef<Gesture>(null)
@@ -193,6 +194,10 @@ export default function Canvas() {
         if (longPress.current) {
           window.clearTimeout(longPress.current)
           longPress.current = null
+        }
+        if (pendingMultiSelectTap.current) {
+          window.clearTimeout(pendingMultiSelectTap.current)
+          pendingMultiSelectTap.current = null
         }
       }
       if (e.touches.length === 1) {
@@ -420,7 +425,11 @@ export default function Canvas() {
             e.stopPropagation()
             if (l.locked || editingId === l.id) return
             if (multiSelectModeRef.current) {
-              select(l.id, true)
+              if (pendingMultiSelectTap.current) window.clearTimeout(pendingMultiSelectTap.current)
+              pendingMultiSelectTap.current = window.setTimeout(() => {
+                select(l.id, true)
+                pendingMultiSelectTap.current = null
+              }, 120)
               return
             }
             if (longPress.current) window.clearTimeout(longPress.current)
