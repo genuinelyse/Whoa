@@ -63,6 +63,7 @@ export default function Canvas() {
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [multiSelectMode, setMultiSelectMode] = useState(false)
+  const [pinchActive, setPinchActive] = useState(false)
   const longPress = useRef<number | null>(null)
   const pendingMultiSelectTap = useRef<number | null>(null)
   const multiSelectModeRef = useRef(false)
@@ -235,6 +236,7 @@ export default function Canvas() {
           }
         }
         pinching.current = true
+        setPinchActive(true)
         gesture.current = null
         panGesture.current = null
       }
@@ -274,7 +276,11 @@ export default function Canvas() {
     }
     const onTouchEnd = (e: TouchEvent) => {
       touchCount.current = e.touches.length
-      if (e.touches.length < 2) { pinch.current = null; pinching.current = false }
+      if (e.touches.length < 2) {
+        pinch.current = null
+        pinching.current = false
+        setPinchActive(false)
+      }
       if (e.touches.length === 0) touchSelectionLock.current = null
     }
     const stop = (e: Event) => e.preventDefault()
@@ -461,8 +467,8 @@ export default function Canvas() {
                   height: l.type === 'text' ? 'auto' : l.h,
                   opacity: a.opacity,
                   transform: a.transform,
-                  outline: isSel ? `${2 / eff}px solid ${multiSelectMode ? '#4B1D6B' : '#007AFF'}` : 'none',
-                  outlineOffset: multiSelectModeRef.current ? 2 / eff : 0,
+                  outline: isSel ? `${2 / eff}px solid ${multiSelectMode && !pinchActive ? '#4B1D6B' : '#007AFF'}` : 'none',
+                  outlineOffset: multiSelectMode && !pinchActive ? 2 / eff : 0,
                   cursor: l.locked ? 'default' : 'move',
                   touchAction: 'none',
                 }}
