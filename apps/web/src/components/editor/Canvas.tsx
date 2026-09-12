@@ -151,7 +151,9 @@ export default function Canvas() {
         longPress.current = null
       }
       const g = gesture.current
-      if (g?.mode === 'move' && g.fromCanvas && !g.moved && !multiSelectModeRef.current) {
+      if (g?.mode === 'move' && g.fromCanvas && !g.moved) {
+        setMultiSelectMode(false)
+        multiSelectModeRef.current = false
         select(null)
       }
       gesture.current = null
@@ -429,13 +431,27 @@ export default function Canvas() {
         // background starts a deferred move for the selected layer: it becomes
         // a deselect on tap, or a drag when the pointer actually moves.
         if (pinching.current || (e.pointerType === 'touch' && (touchCount.current >= 2 || activeTouches.current.size > 1))) return
-        if (e.pointerType === 'touch' && multiSelectModeRef.current) {
+        if (e.pointerType === 'touch' && multiSelectModeRef.current && selectedIds.length > 0) {
           e.preventDefault()
           e.stopPropagation()
-          setMultiSelectMode(false)
-          multiSelectModeRef.current = false
-          select(null)
-          setEditingId(null)
+          const group = project.layers
+            .filter((item) => selectedIds.includes(item.id) && !item.locked)
+            .map((item) => ({ id: item.id, x: item.x, y: item.y }))
+          if (group.length > 0) {
+            gesture.current = {
+              id: group[0].id,
+              mode: 'move',
+              sx: e.clientX,
+              sy: e.clientY,
+              ox: group[0].x,
+              oy: group[0].y,
+              ow: project.layers.find((item) => item.id === group[0].id)?.w || 0,
+              oh: project.layers.find((item) => item.id === group[0].id)?.h || 0,
+              fromCanvas: true,
+              moved: false,
+              group,
+            }
+          }
           return
         }
         if (e.pointerType === 'touch' && selectedId) {
