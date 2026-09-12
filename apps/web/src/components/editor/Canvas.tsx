@@ -285,7 +285,7 @@ export default function Canvas() {
     }
     const onTouchEnd = (e: TouchEvent) => {
       touchCount.current = e.touches.length
-      if (e.touches.length < 2) {
+      if (e.touches.length < 2 && (pinch.current || pinching.current || pinchTouchSequence.current)) {
         pinch.current = null
         pinching.current = false
         setPinchActive(false)
