@@ -55,7 +55,7 @@ type Gesture =
 
 type Pinch =
   | { mode: 'zoom'; startDist: number; s0: number; lx: number; ly: number }
-  | { mode: 'resize'; id: string; startDist: number; w0: number; h0: number; x0: number; y0: number; fontSize: number; group?: { id: string; x: number; y: number; w: number; h: number }[] }
+  | { mode: 'resize'; id: string; startDist: number; w0: number; h0: number; x0: number; y0: number; fontSize: number; group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number }[] }
   | null
 
 export default function Canvas() {
@@ -235,7 +235,7 @@ export default function Canvas() {
             y0: selected.y,
             fontSize: selected.fontSize || 40,
             group: selectedIdsRef.current.length > 1
-            ? layersRef.current.filter((item) => selectedIdsRef.current.includes(item.id) && !item.locked).map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h }))
+            ? layersRef.current.filter((item) => selectedIdsRef.current.includes(item.id) && !item.locked).map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h, fontSize: item.type === 'text' ? item.fontSize : undefined }))
             : undefined,
           }
         } else {
@@ -271,7 +271,18 @@ export default function Canvas() {
             for (const item of p.group) {
               const w = Math.max(20, item.w * ratio)
               const h = Math.max(20, item.h * ratio)
-              updateLayer(item.id, { x: cx + (item.x + item.w / 2 - cx) * ratio - w / 2, y: cy + (item.y + item.h / 2 - cy) * ratio - h / 2, w, h })
+              const layer = layersRef.current.find((candidate) => candidate.id === item.id)
+              const next = {
+                x: cx + (item.x + item.w / 2 - cx) * ratio - w / 2,
+                y: cy + (item.y + item.h / 2 - cy) * ratio - h / 2,
+                w,
+                h,
+              }
+              if (layer?.type === 'text' && item.fontSize) {
+                updateLayer(item.id, { ...next, fontSize: Math.max(6, Math.round(item.fontSize * ratio)) })
+              } else {
+                updateLayer(item.id, next)
+              }
             }
           } else {
             const w = Math.max(20, p.w0 * ratio)
@@ -418,7 +429,7 @@ export default function Canvas() {
             group: selectedIdsRef.current.length > 1
               ? layersRef.current
                 .filter((item) => selectedIdsRef.current.includes(item.id) && !item.locked)
-                .map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h }))
+                .map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h, fontSize: item.type === 'text' ? item.fontSize : undefined }))
               : undefined,
           }
         } else {
