@@ -342,11 +342,12 @@ export default function Canvas() {
     if (e.pointerType === 'touch') {
       e.currentTarget.setPointerCapture?.(e.pointerId)
       if (multiSelectModeRef.current) {
-        select(l.id, true)
-        gesture.current = null
-        return
-      }
-      if (!selectedIds.includes(l.id)) select(l.id)
+        if (!selectedIds.includes(l.id)) {
+          select(l.id, true)
+          gesture.current = null
+          return
+        }
+      } else if (!selectedIds.includes(l.id)) select(l.id)
     } else if (!selectedIds.includes(l.id)) select(l.id)
     const group = selectedIds.length > 1 && selectedIds.includes(l.id)
       ? project.layers.filter((item) => selectedIds.includes(item.id)).map((item) => ({ id: item.id, x: item.x, y: item.y }))
