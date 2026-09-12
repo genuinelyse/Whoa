@@ -68,6 +68,7 @@ export default function Canvas() {
   const pendingMultiSelectTap = useRef<number | null>(null)
   const pinchTouchSequence = useRef(false)
   const pinchStartedInMultiSelect = useRef(false)
+  const longPressActivated = useRef(false)
   const multiSelectModeRef = useRef(false)
   multiSelectModeRef.current = multiSelectMode
   const gesture = useRef<Gesture>(null)
@@ -341,7 +342,7 @@ export default function Canvas() {
     e.stopPropagation()
     if (e.pointerType === 'touch') {
       e.currentTarget.setPointerCapture?.(e.pointerId)
-      if (multiSelectModeRef.current) {
+      if (multiSelectModeRef.current || longPressActivated.current) {
         select(l.id, true)
         return
       }
@@ -427,7 +428,7 @@ export default function Canvas() {
         // background starts a deferred move for the selected layer: it becomes
         // a deselect on tap, or a drag when the pointer actually moves.
         if (pinching.current || (e.pointerType === 'touch' && (touchCount.current >= 2 || activeTouches.current.size > 1))) return
-        if (e.pointerType === 'touch' && multiSelectModeRef.current) return
+        if (e.pointerType === 'touch' && (multiSelectModeRef.current || longPressActivated.current)) return
         if (e.pointerType === 'touch' && selectedId) {
           const selected = project.layers.find((l) => l.id === selectedId)
           if (!multiSelectModeRef.current && selected && !selected.locked && editingId !== selected.id) {
@@ -445,6 +446,7 @@ export default function Canvas() {
         }
         setMultiSelectMode(false)
         multiSelectModeRef.current = false
+        longPressActivated.current = false
         select(null)
         setEditingId(null)
       }}
@@ -471,6 +473,7 @@ export default function Canvas() {
             if (multiSelectModeRef.current) return
             if (longPress.current) window.clearTimeout(longPress.current)
             longPress.current = window.setTimeout(() => {
+              longPressActivated.current = true
               setMultiSelectMode(true)
               multiSelectModeRef.current = true
               select(l.id, true)
