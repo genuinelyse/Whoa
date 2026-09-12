@@ -335,7 +335,7 @@ export default function Canvas() {
       (e.pointerType === 'touch' &&
         (pinchTouchSequence.current || touchCount.current >= 2 ||
           activeTouches.current.size > 1 ||
-          (touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
+          (!multiSelectModeRef.current && touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
       (e.pointerType === 'touch' && pinch.current !== null)
     ) return
     e.stopPropagation()
@@ -343,6 +343,7 @@ export default function Canvas() {
       e.currentTarget.setPointerCapture?.(e.pointerId)
       if (multiSelectModeRef.current) {
         select(l.id, true)
+        gesture.current = null
         return
       }
       if (!selectedIds.includes(l.id)) select(l.id)
