@@ -427,11 +427,7 @@ export default function Canvas() {
         // background starts a deferred move for the selected layer: it becomes
         // a deselect on tap, or a drag when the pointer actually moves.
         if (pinching.current || (e.pointerType === 'touch' && (touchCount.current >= 2 || activeTouches.current.size > 1))) return
-        if (e.pointerType === 'touch' && multiSelectModeRef.current) {
-          e.preventDefault()
-          e.stopPropagation()
-          return
-        }
+        if (e.pointerType === 'touch' && multiSelectModeRef.current) return
         if (e.pointerType === 'touch' && selectedId) {
           const selected = project.layers.find((l) => l.id === selectedId)
           if (!multiSelectModeRef.current && selected && !selected.locked && editingId !== selected.id) {
@@ -470,7 +466,6 @@ export default function Canvas() {
                 key={l.id}
                 ref={isSel ? selRef : undefined}
           onTouchStart={(e) => {
-            e.preventDefault()
             e.stopPropagation()
             if (l.locked || editingId === l.id) return
             if (multiSelectModeRef.current) return
