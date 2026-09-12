@@ -67,6 +67,7 @@ export default function Canvas() {
   const longPress = useRef<number | null>(null)
   const pendingMultiSelectTap = useRef<number | null>(null)
   const pinchTouchSequence = useRef(false)
+  const pinchStartedInMultiSelect = useRef(false)
   const multiSelectModeRef = useRef(false)
   multiSelectModeRef.current = multiSelectMode
   const gesture = useRef<Gesture>(null)
@@ -194,6 +195,11 @@ export default function Canvas() {
       touchCount.current = e.touches.length
       if (e.touches.length >= 2) {
         pinchTouchSequence.current = true
+        pinchStartedInMultiSelect.current = multiSelectModeRef.current
+        if (!pinchStartedInMultiSelect.current) {
+          setMultiSelectMode(false)
+          multiSelectModeRef.current = false
+        }
         if (longPress.current) {
           window.clearTimeout(longPress.current)
           longPress.current = null
@@ -283,6 +289,11 @@ export default function Canvas() {
         pinch.current = null
         pinching.current = false
         setPinchActive(false)
+        if (!pinchStartedInMultiSelect.current) {
+          setMultiSelectMode(false)
+          multiSelectModeRef.current = false
+        }
+        pinchStartedInMultiSelect.current = false
       }
       if (e.touches.length === 0) {
         touchSelectionLock.current = null
