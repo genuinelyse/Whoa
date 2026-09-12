@@ -83,7 +83,9 @@ export default function Canvas() {
   const touchSelectionLock = useRef<string | null>(null)
   const activeTouches = useRef(new Map<number, { x: number; y: number }>())
   const selectedRef = useRef(selectedId)
+  const selectedIdsRef = useRef(selectedIds)
   selectedRef.current = selectedId
+  selectedIdsRef.current = selectedIds
   const layersRef = useRef(project.layers)
   layersRef.current = project.layers
   const selHRef = useRef(selH)
@@ -232,7 +234,9 @@ export default function Canvas() {
             x0: selected.x,
             y0: selected.y,
             fontSize: selected.fontSize || 40,
-            group: selectedIds.length > 1 ? layersRef.current.filter((item) => selectedIds.includes(item.id)).map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h })) : undefined,
+            group: selectedIdsRef.current.length > 1
+            ? layersRef.current.filter((item) => selectedIdsRef.current.includes(item.id) && !item.locked).map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h }))
+            : undefined,
           }
         } else {
           const m = tmid(t1, t2)
@@ -402,7 +406,21 @@ export default function Canvas() {
         const selected = layersRef.current.find((l) => l.id === touchSelectionLock.current)
         if (selected && !selected.locked) {
           const h = selected.type === 'text' ? (selHRef.current || selected.h) : selected.h
-          pinch.current = { mode: 'resize', id: selected.id, startDist, w0: selected.w, h0: h, x0: selected.x, y0: selected.y, fontSize: selected.fontSize || 40 }
+          pinch.current = {
+            mode: 'resize',
+            id: selected.id,
+            startDist,
+            w0: selected.w,
+            h0: h,
+            x0: selected.x,
+            y0: selected.y,
+            fontSize: selected.fontSize || 40,
+            group: selectedIdsRef.current.length > 1
+              ? layersRef.current
+                .filter((item) => selectedIdsRef.current.includes(item.id) && !item.locked)
+                .map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h }))
+              : undefined,
+          }
         } else {
           const v = viewRef.current
           const { cx, cy } = center()
