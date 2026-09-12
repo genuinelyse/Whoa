@@ -321,7 +321,7 @@ export default function Canvas() {
   }, [])
 
   const startMove = (e: React.PointerEvent, l: Layer) => {
-    if (e.pointerType === 'touch' && (pinching.current || activeTouches.current.size > 0)) {
+    if (e.pointerType === 'touch' && (pinching.current || activeTouches.current.size > 1)) {
       e.stopPropagation()
       e.preventDefault()
       return
@@ -334,7 +334,7 @@ export default function Canvas() {
       pinching.current ||
       (e.pointerType === 'touch' &&
         (pinchTouchSequence.current || touchCount.current >= 2 ||
-          activeTouches.current.size > 0 ||
+          activeTouches.current.size > 1 ||
           (touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
       (e.pointerType === 'touch' && pinch.current !== null)
     ) return
