@@ -321,6 +321,11 @@ export default function Canvas() {
   }, [])
 
   const startMove = (e: React.PointerEvent, l: Layer) => {
+    if (e.pointerType === 'touch' && (pinching.current || activeTouches.current.size > 0)) {
+      e.stopPropagation()
+      e.preventDefault()
+      return
+    }
     // Once a second touch exists, do not let its hit-tested layer replace the
     // selection that the pinch gesture is resizing.
     if (
@@ -329,7 +334,7 @@ export default function Canvas() {
       pinching.current ||
       (e.pointerType === 'touch' &&
         (pinchTouchSequence.current || touchCount.current >= 2 ||
-          activeTouches.current.size > 1 ||
+          activeTouches.current.size > 0 ||
           (touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
       (e.pointerType === 'touch' && pinch.current !== null)
     ) return
@@ -376,6 +381,10 @@ export default function Canvas() {
         if (e.pointerType !== 'touch') return
         if (activeTouches.current.size === 0) touchSelectionLock.current = selectedRef.current
         activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+        if (activeTouches.current.size >= 2) {
+          e.preventDefault()
+          e.stopPropagation()
+        }
         if (activeTouches.current.size < 2 || pinch.current) return
 
         const points = Array.from(activeTouches.current.values())
