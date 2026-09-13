@@ -5,13 +5,15 @@ import { createLayer, uid } from '#/lib/data'
 interface State {
   project: Project
   selectedId: string | null
+  selectedIds: string[]
   tool: string | null
   time: number
   playing: boolean
 }
 
 type Action =
-  | { t: 'select'; id: string | null }
+  | { t: 'select'; id: string | null; additive?: boolean }
+  | { t: 'toggleSelect'; id: string }
   | { t: 'tool'; tool: string | null }
   | { t: 'addLayer'; layer: Layer }
   | { t: 'updateLayer'; id: string; patch: Partial<Layer> }
@@ -33,15 +35,30 @@ function reducer(state: State, a: Action): State {
   const p = state.project
   switch (a.t) {
     case 'select':
-      return { ...state, selectedId: a.id }
+      return {
+        ...state,
+        selectedId: a.id,
+        selectedIds: a.id ? (a.additive ? Array.from(new Set([...state.selectedIds, a.id])) : [a.id]) : [],
+      }
+    case 'toggleSelect': {
+      const selectedIds = state.selectedIds.includes(a.id)
+        ? state.selectedIds.filter((id) => id !== a.id)
+        : [...state.selectedIds, a.id]
+      return { ...state, selectedIds, selectedId: selectedIds.at(-1) ?? null }
+    }
     case 'tool':
       return { ...state, tool: a.tool }
     case 'addLayer':
-      return { ...state, project: touch({ ...p, layers: [...p.layers, a.layer] }), selectedId: a.layer.id, tool: null }
+      return { ...state, project: touch({ ...p, layers: [...p.layers, a.layer] }), selectedId: a.layer.id, selectedIds: [a.layer.id], tool: null }
     case 'updateLayer':
       return { ...state, project: touch({ ...p, layers: p.layers.map((l) => (l.id === a.id ? { ...l, ...a.patch } : l)) }) }
     case 'deleteLayer':
-      return { ...state, project: touch({ ...p, layers: p.layers.filter((l) => l.id !== a.id) }), selectedId: state.selectedId === a.id ? null : state.selectedId }
+      return {
+        ...state,
+        project: touch({ ...p, layers: p.layers.filter((l) => l.id !== a.id) }),
+        selectedId: state.selectedId === a.id ? null : state.selectedId,
+        selectedIds: state.selectedIds.filter((id) => id !== a.id),
+      }
     case 'duplicate': {
       const src = p.layers.find((l) => l.id === a.id)
       if (!src) return state
@@ -78,7 +95,9 @@ function reducer(state: State, a: Action): State {
 interface Ctx extends State {
   mode: 'static' | 'animated'
   selected: Layer | null
-  select: (id: string | null) => void
+  selectedIds: string[]
+  select: (id: string | null, additive?: boolean) => void
+  toggleSelect: (id: string) => void
   openTool: (tool: string | null) => void
   addLayer: (type: LayerType, extra?: Partial<Layer>) => void
   updateLayer: (id: string, patch: Partial<Layer>) => void
@@ -96,9 +115,10 @@ interface Ctx extends State {
 const EditorCtx = createContext<Ctx | null>(null)
 
 export function EditorProvider({ project, children }: { project: Project; children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, tool: null, time: 0, playing: false })
+  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false })
 
-  const select = useCallback((id: string | null) => dispatch({ t: 'select', id }), [])
+  const select = useCallback((id: string | null, additive = false) => dispatch({ t: 'select', id, additive }), [])
+  const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
   const openTool = useCallback((tool: string | null) => dispatch({ t: 'tool', tool }), [])
   const updateLayer = useCallback((id: string, patch: Partial<Layer>) => dispatch({ t: 'updateLayer', id, patch }), [])
   const deleteLayer = useCallback((id: string) => dispatch({ t: 'deleteLayer', id }), [])
@@ -125,7 +145,8 @@ export function EditorProvider({ project, children }: { project: Project; childr
       ...state,
       mode: state.project.mode,
       selected: state.project.layers.find((l) => l.id === state.selectedId) || null,
-      select, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder,
+      selectedIds: state.selectedIds,
+      select, toggleSelect, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder,
       setBackground, setTime, setPlaying, setMode, rename, setDuration,
     }),
     [state, select, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder, setBackground, setTime, setPlaying, setMode, rename, setDuration],

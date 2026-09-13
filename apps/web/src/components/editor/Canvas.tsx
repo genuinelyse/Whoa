@@ -49,19 +49,27 @@ const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.cl
 
 type Corner = 'tl' | 'tr' | 'bl' | 'br'
 type Gesture =
-  | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean }
+  | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean; group?: { id: string; x: number; y: number }[] }
   | { id: string; mode: 'resize'; corner: Corner; isText: boolean; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; ofs: number }
   | null
 
 type Pinch =
   | { mode: 'zoom'; startDist: number; s0: number; lx: number; ly: number }
-  | { mode: 'resize'; id: string; startDist: number; w0: number; h0: number; x0: number; y0: number; fontSize: number }
+  | { mode: 'resize'; id: string; startDist: number; w0: number; h0: number; x0: number; y0: number; fontSize: number; group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number }[] }
   | null
 
 export default function Canvas() {
-  const { project, selectedId, select, updateLayer, time, mode, playing } = useEditor()
+  const { project, selectedId, selectedIds, select, updateLayer, time, mode, playing } = useEditor()
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [multiSelectMode, setMultiSelectMode] = useState(false)
+  const [pinchActive, setPinchActive] = useState(false)
+  const longPress = useRef<number | null>(null)
+  const pendingMultiSelectTap = useRef<number | null>(null)
+  const pinchTouchSequence = useRef(false)
+  const pinchStartedInMultiSelect = useRef(false)
+  const multiSelectModeRef = useRef(false)
+  multiSelectModeRef.current = multiSelectMode
   const gesture = useRef<Gesture>(null)
   const panGesture = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean }>(null)
   const selRef = useRef<HTMLDivElement>(null)
@@ -75,7 +83,9 @@ export default function Canvas() {
   const touchSelectionLock = useRef<string | null>(null)
   const activeTouches = useRef(new Map<number, { x: number; y: number }>())
   const selectedRef = useRef(selectedId)
+  const selectedIdsRef = useRef(selectedIds)
   selectedRef.current = selectedId
+  selectedIdsRef.current = selectedIds
   const layersRef = useRef(project.layers)
   layersRef.current = project.layers
   const selHRef = useRef(selH)
@@ -114,7 +124,11 @@ export default function Canvas() {
       const dy = (e.clientY - g.sy) / eff
       if (g.mode === 'move') {
         if (Math.abs(e.clientX - g.sx) > 3 || Math.abs(e.clientY - g.sy) > 3) g.moved = true
-        updateLayer(g.id, { x: g.ox + dx, y: g.oy + dy })
+        if (g.group) {
+          for (const item of g.group) updateLayer(item.id, { x: item.x + dx, y: item.y + dy })
+        } else {
+          updateLayer(g.id, { x: g.ox + dx, y: g.oy + dy })
+        }
         return
       }
       // resize from a corner
@@ -134,8 +148,16 @@ export default function Canvas() {
       }
     }
     const up = () => {
+      if (longPress.current) {
+        window.clearTimeout(longPress.current)
+        longPress.current = null
+      }
       const g = gesture.current
-      if (g?.mode === 'move' && g.fromCanvas && !g.moved) select(null)
+      if (g?.mode === 'move' && g.fromCanvas && !g.moved) {
+        setMultiSelectMode(false)
+        multiSelectModeRef.current = false
+        select(null)
+      }
       gesture.current = null
       panGesture.current = null
     }
@@ -175,6 +197,23 @@ export default function Canvas() {
     }
     const onTouchStart = (e: TouchEvent) => {
       touchCount.current = e.touches.length
+      if (e.touches.length >= 2) {
+        pinchTouchSequence.current = true
+        pinchStartedInMultiSelect.current = multiSelectModeRef.current
+        if (!pinchStartedInMultiSelect.current) {
+          setMultiSelectMode(false)
+          multiSelectModeRef.current = false
+        }
+        if (longPress.current) {
+          window.clearTimeout(longPress.current)
+          longPress.current = null
+        }
+        if (pendingMultiSelectTap.current) {
+          window.clearTimeout(pendingMultiSelectTap.current)
+          pendingMultiSelectTap.current = null
+        }
+
+      }
       if (e.touches.length === 1) {
         touchSelectionLock.current = selectedRef.current
         return
@@ -195,6 +234,9 @@ export default function Canvas() {
             x0: selected.x,
             y0: selected.y,
             fontSize: selected.fontSize || 40,
+            group: selectedIdsRef.current.length > 1
+            ? layersRef.current.filter((item) => selectedIdsRef.current.includes(item.id) && !item.locked).map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h, fontSize: item.type === 'text' ? item.fontSize : undefined }))
+            : undefined,
           }
         } else {
           const m = tmid(t1, t2)
@@ -209,6 +251,7 @@ export default function Canvas() {
           }
         }
         pinching.current = true
+        setPinchActive(true)
         gesture.current = null
         panGesture.current = null
       }
@@ -222,14 +265,32 @@ export default function Canvas() {
         if (p.mode === 'resize') {
           const selected = layersRef.current.find((l) => l.id === p.id)
           if (!selected) return
-          const w = Math.max(20, p.w0 * ratio)
-          const h = Math.max(20, p.h0 * ratio)
-          const x = p.x0 + (p.w0 - w) / 2
-          const y = p.y0 + (p.h0 - h) / 2
-          if (selected.type === 'text') {
-            updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratio)) })
+          if (p.group) {
+            const cx = p.group.reduce((sum, item) => sum + item.x + item.w / 2, 0) / p.group.length
+            const cy = p.group.reduce((sum, item) => sum + item.y + item.h / 2, 0) / p.group.length
+            for (const item of p.group) {
+              const w = Math.max(20, item.w * ratio)
+              const h = Math.max(20, item.h * ratio)
+              const layer = layersRef.current.find((candidate) => candidate.id === item.id)
+              const next = {
+                x: cx + (item.x + item.w / 2 - cx) * ratio - w / 2,
+                y: cy + (item.y + item.h / 2 - cy) * ratio - h / 2,
+                w,
+                h,
+              }
+              if (layer?.type === 'text' && item.fontSize) {
+                updateLayer(item.id, { ...next, fontSize: Math.max(6, Math.round(item.fontSize * ratio)) })
+              } else {
+                updateLayer(item.id, next)
+              }
+            }
           } else {
-            updateLayer(p.id, { x, y, w, h })
+            const w = Math.max(20, p.w0 * ratio)
+            const h = Math.max(20, p.h0 * ratio)
+            const x = p.x0 + (p.w0 - w) / 2
+            const y = p.y0 + (p.h0 - h) / 2
+            if (selected.type === 'text') updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratio)) })
+            else updateLayer(p.id, { x, y, w, h })
           }
           return
         }
@@ -241,8 +302,20 @@ export default function Canvas() {
     }
     const onTouchEnd = (e: TouchEvent) => {
       touchCount.current = e.touches.length
-      if (e.touches.length < 2) { pinch.current = null; pinching.current = false }
-      if (e.touches.length === 0) touchSelectionLock.current = null
+      if (e.touches.length < 2 && (pinch.current || pinching.current || pinchTouchSequence.current)) {
+        pinch.current = null
+        pinching.current = false
+        setPinchActive(false)
+        if (!pinchStartedInMultiSelect.current) {
+          setMultiSelectMode(false)
+          multiSelectModeRef.current = false
+        }
+        pinchStartedInMultiSelect.current = false
+      }
+      if (e.touches.length === 0) {
+        touchSelectionLock.current = null
+        pinchTouchSequence.current = false
+      }
     }
     const stop = (e: Event) => e.preventDefault()
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -265,6 +338,11 @@ export default function Canvas() {
   }, [])
 
   const startMove = (e: React.PointerEvent, l: Layer) => {
+    if (e.pointerType === 'touch' && (pinching.current || activeTouches.current.size > 1)) {
+      e.stopPropagation()
+      e.preventDefault()
+      return
+    }
     // Once a second touch exists, do not let its hit-tested layer replace the
     // selection that the pinch gesture is resizing.
     if (
@@ -272,13 +350,26 @@ export default function Canvas() {
       editingId === l.id ||
       pinching.current ||
       (e.pointerType === 'touch' &&
-        (touchCount.current >= 2 ||
+        (pinchTouchSequence.current || touchCount.current >= 2 ||
           activeTouches.current.size > 1 ||
-          (touchSelectionLock.current !== null && touchSelectionLock.current !== l.id)))
+          (!multiSelectModeRef.current && touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
+      (e.pointerType === 'touch' && pinch.current !== null)
     ) return
     e.stopPropagation()
-    select(l.id)
-    gesture.current = { id: l.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: l.h, fromCanvas: false, moved: false }
+    if (e.pointerType === 'touch') {
+      e.currentTarget.setPointerCapture?.(e.pointerId)
+      if (multiSelectModeRef.current) {
+        if (!selectedIds.includes(l.id)) {
+          select(l.id, true)
+          gesture.current = null
+          return
+        }
+      } else if (!selectedIds.includes(l.id)) select(l.id)
+    } else if (!selectedIds.includes(l.id)) select(l.id)
+    const group = selectedIds.length > 1 && selectedIds.includes(l.id)
+      ? project.layers.filter((item) => selectedIds.includes(item.id)).map((item) => ({ id: item.id, x: item.x, y: item.y }))
+      : undefined
+    gesture.current = { id: l.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: l.h, fromCanvas: false, moved: false, group }
   }
   const startResize = (e: React.PointerEvent, l: Layer, corner: Corner, boxH: number) => {
     if (pinching.current) return
@@ -309,6 +400,10 @@ export default function Canvas() {
         if (e.pointerType !== 'touch') return
         if (activeTouches.current.size === 0) touchSelectionLock.current = selectedRef.current
         activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+        if (activeTouches.current.size >= 2) {
+          e.preventDefault()
+          e.stopPropagation()
+        }
         if (activeTouches.current.size < 2 || pinch.current) return
 
         const points = Array.from(activeTouches.current.values())
@@ -317,11 +412,26 @@ export default function Canvas() {
         e.preventDefault()
         e.stopPropagation()
         pinching.current = true
+        pinchTouchSequence.current = true
         gesture.current = null
         const selected = layersRef.current.find((l) => l.id === touchSelectionLock.current)
         if (selected && !selected.locked) {
           const h = selected.type === 'text' ? (selHRef.current || selected.h) : selected.h
-          pinch.current = { mode: 'resize', id: selected.id, startDist, w0: selected.w, h0: h, x0: selected.x, y0: selected.y, fontSize: selected.fontSize || 40 }
+          pinch.current = {
+            mode: 'resize',
+            id: selected.id,
+            startDist,
+            w0: selected.w,
+            h0: h,
+            x0: selected.x,
+            y0: selected.y,
+            fontSize: selected.fontSize || 40,
+            group: selectedIdsRef.current.length > 1
+              ? layersRef.current
+                .filter((item) => selectedIdsRef.current.includes(item.id) && !item.locked)
+                .map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h, fontSize: item.type === 'text' ? item.fontSize : undefined }))
+              : undefined,
+          }
         } else {
           const v = viewRef.current
           const { cx, cy } = center()
@@ -334,19 +444,48 @@ export default function Canvas() {
         if (e.pointerType === 'touch') activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
       }}
       onPointerUpCapture={(e) => {
-        if (e.pointerType === 'touch') activeTouches.current.delete(e.pointerId)
+        if (e.pointerType === 'touch') {
+          activeTouches.current.delete(e.pointerId)
+          if (activeTouches.current.size === 0) pinchTouchSequence.current = false
+        }
       }}
       onPointerCancelCapture={(e) => {
-        if (e.pointerType === 'touch') activeTouches.current.delete(e.pointerId)
+        if (e.pointerType === 'touch') {
+          activeTouches.current.delete(e.pointerId)
+          if (activeTouches.current.size === 0) pinchTouchSequence.current = false
+        }
       }}
       onPointerDown={(e) => {
         // The second touch belongs to the active pinch. A first touch on the
         // background starts a deferred move for the selected layer: it becomes
         // a deselect on tap, or a drag when the pointer actually moves.
         if (pinching.current || (e.pointerType === 'touch' && (touchCount.current >= 2 || activeTouches.current.size > 1))) return
+        if (e.pointerType === 'touch' && multiSelectModeRef.current && selectedIds.length > 0) {
+          e.preventDefault()
+          e.stopPropagation()
+          const group = project.layers
+            .filter((item) => selectedIds.includes(item.id) && !item.locked)
+            .map((item) => ({ id: item.id, x: item.x, y: item.y }))
+          if (group.length > 0) {
+            gesture.current = {
+              id: group[0].id,
+              mode: 'move',
+              sx: e.clientX,
+              sy: e.clientY,
+              ox: group[0].x,
+              oy: group[0].y,
+              ow: project.layers.find((item) => item.id === group[0].id)?.w || 0,
+              oh: project.layers.find((item) => item.id === group[0].id)?.h || 0,
+              fromCanvas: true,
+              moved: false,
+              group,
+            }
+          }
+          return
+        }
         if (e.pointerType === 'touch' && selectedId) {
           const selected = project.layers.find((l) => l.id === selectedId)
-          if (selected && !selected.locked && editingId !== selected.id) {
+          if (!multiSelectModeRef.current && selected && !selected.locked && editingId !== selected.id) {
             e.preventDefault()
             gesture.current = { id: selected.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: selected.x, oy: selected.y, ow: selected.w, oh: selected.h, fromCanvas: true, moved: false }
             return
@@ -359,6 +498,8 @@ export default function Canvas() {
           panGesture.current = { sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, moved: false }
           return
         }
+        setMultiSelectMode(false)
+        multiSelectModeRef.current = false
         select(null)
         setEditingId(null)
       }}
@@ -374,13 +515,35 @@ export default function Canvas() {
           {project.layers.map((l) => {
             const a = anim(l, time, active)
             if (!l.visible || a.hidden) return null
-            const isSel = l.id === selectedId
+            const isSel = selectedIds.includes(l.id)
             return (
               <div
                 key={l.id}
                 ref={isSel ? selRef : undefined}
-                onPointerDown={(e) => startMove(e, l)}
-                onDoubleClick={(e) => { e.stopPropagation(); if (l.type === 'text') setEditingId(l.id) }}
+          onTouchStart={(e) => {
+            e.stopPropagation()
+            if (l.locked || editingId === l.id) return
+            if (multiSelectModeRef.current) return
+            if (longPress.current) window.clearTimeout(longPress.current)
+            longPress.current = window.setTimeout(() => {
+              setMultiSelectMode(true)
+              multiSelectModeRef.current = true
+              select(l.id, true)
+              gesture.current = null
+              longPress.current = null
+            }, 600)
+          }}
+          onPointerDown={(e) => startMove(e, l)}
+          onContextMenu={(e) => {
+            if (multiSelectModeRef.current) {
+              e.preventDefault()
+              e.stopPropagation()
+              setMultiSelectMode(true)
+              multiSelectModeRef.current = true
+              select(l.id, true)
+            }
+          }}
+          onDoubleClick={(e) => { e.stopPropagation(); if (l.type === 'text') setEditingId(l.id) }}
                 data-testid={`layer-${l.id}`}
                 style={{
                   position: 'absolute',
@@ -390,8 +553,10 @@ export default function Canvas() {
                   height: l.type === 'text' ? 'auto' : l.h,
                   opacity: a.opacity,
                   transform: a.transform,
-                  outline: isSel ? `${2 / eff}px solid #007AFF` : 'none',
+                  outline: isSel ? `${2 / eff}px solid ${multiSelectMode && !pinchActive ? '#4B1D6B' : '#007AFF'}` : 'none',
+                  outlineOffset: multiSelectMode && !pinchActive ? 2 / eff : 0,
                   cursor: l.locked ? 'default' : 'move',
+                  touchAction: 'none',
                 }}
               >
                 <LayerContent
