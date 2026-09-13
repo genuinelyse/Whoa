@@ -1,7 +1,7 @@
 {
   "name": "opencut",
   "private": true,
-  "packageManager": "bun@1.3.11",
+  "packageManager": "bun@1.1.34",
   "workspaces": [
     "apps/*"
   ],
