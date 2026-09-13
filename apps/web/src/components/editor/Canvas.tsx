@@ -396,7 +396,7 @@ export default function Canvas() {
       (e.pointerType === 'touch' &&
         (pinchTouchSequence.current || touchCount.current >= 2 ||
           activeTouches.current.size > 1 ||
-          (!multiSelectModeRef.current && touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
+          (touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
       (e.pointerType === 'touch' && pinch.current !== null)
     ) return
     e.stopPropagation()
