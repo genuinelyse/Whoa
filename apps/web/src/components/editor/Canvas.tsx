@@ -790,8 +790,7 @@ function LayerContent({
       fontWeight: layer.fontWeight,
       color: layer.color,
       textAlign: layer.align,
-      // A unit line box keeps the selection border tight to the glyph line.
-      lineHeight: 1,
+      lineHeight: 1.15,
       width: '100%',
       padding: 0,
       // Keep pinch resizing from introducing accidental soft wraps that change
