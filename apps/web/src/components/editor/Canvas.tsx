@@ -341,6 +341,9 @@ export default function Canvas() {
         }
         pinchStartedInMultiSelect.current = false
       }
+      // Keep the touch sequence locked while one finger remains down. Safari
+      // can send that remaining finger over another layer before the final
+      // touchend, which must not start a new selection.
       if (e.touches.length === 0) {
         touchSelectionLock.current = null
         pinchTouchSequence.current = false
@@ -643,24 +646,27 @@ export default function Canvas() {
             const sel = project.layers.find((l) => l.id === selectedId)
             if (!sel || editingId || sel.locked || !sel.visible) return null
             const isGroup = multiSelectMode && selected.length > 1
-            const renderedHeight = (layer: Layer) => {
+            const measured = (layer: Layer) => {
               const node = layerRefs.current.get(layer.id)
-              return layer.type === 'text' ? (node?.offsetHeight || (layer.id === selectedId ? selH : 0) || layer.h) : layer.h
+              return {
+                x: node?.offsetLeft ?? layer.x,
+                y: node?.offsetTop ?? layer.y,
+                w: node?.offsetWidth || layer.w,
+                h: node?.offsetHeight || (layer.type === 'text' ? (layer.id === selectedId ? selH : 0) || layer.h : layer.h),
+              }
             }
-            const bounds = isGroup
-              ? selected.reduce(
-                  (box, layer) => {
-                    const height = renderedHeight(layer)
-                    return {
-                      left: Math.min(box.left, layer.x),
-                      top: Math.min(box.top, layer.y),
-                      right: Math.max(box.right, layer.x + layer.w),
-                      bottom: Math.max(box.bottom, layer.y + height),
-                    }
-                  },
-                  { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
-                )
-              : { left: sel.x, top: sel.y, right: sel.x + sel.w, bottom: sel.y + renderedHeight(sel) }
+            const bounds = selected.reduce(
+              (box, layer) => {
+                const rect = measured(layer)
+                return {
+                  left: Math.min(box.left, rect.x),
+                  top: Math.min(box.top, rect.y),
+                  right: Math.max(box.right, rect.x + rect.w),
+                  bottom: Math.max(box.bottom, rect.y + rect.h),
+                }
+              },
+              { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+            )
             const boxW = bounds.right - bounds.left
             const boxH = bounds.bottom - bounds.top
             const size = hs * 3.8
@@ -671,7 +677,10 @@ export default function Canvas() {
               { c: 'bl', cx: 0, cy: boxH },
               { c: 'br', cx: boxW, cy: boxH },
             ]
-            const group = isGroup ? selected.map((layer) => ({ id: layer.id, x: layer.x, y: layer.y, w: layer.w, h: renderedHeight(layer), fontSize: layer.type === 'text' ? layer.fontSize : undefined })) : undefined
+            const group = isGroup ? selected.map((layer) => {
+              const rect = measured(layer)
+              return { id: layer.id, x: rect.x, y: rect.y, w: rect.w, h: rect.h, fontSize: layer.type === 'text' ? layer.fontSize : undefined }
+            }) : undefined
             return (
               <div
                 style={{ position: 'absolute', left: bounds.left, top: bounds.top, width: boxW, height: boxH, border: isGroup ? `${2 / eff}px solid #4B1D6B` : 'none', pointerEvents: 'none', zIndex: 60, boxSizing: 'border-box' }}
