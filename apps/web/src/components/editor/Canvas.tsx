@@ -634,7 +634,7 @@ export default function Canvas() {
             const group = isGroup ? selected.map((layer) => ({ id: layer.id, x: layer.x, y: layer.y, w: layer.w, h: layer.type === 'text' ? (layer.id === selectedId ? selH || layer.h : layer.h) : layer.h, fontSize: layer.type === 'text' ? layer.fontSize : undefined })) : undefined
             return (
               <div
-                style={{ position: 'absolute', left: bounds.left, top: bounds.top, width: boxW, height: boxH, border: `${2 / eff}px solid #4B1D6B`, pointerEvents: 'none', zIndex: 60, boxSizing: 'border-box' }}
+                style={{ position: 'absolute', left: bounds.left, top: bounds.top, width: boxW, height: boxH, border: isGroup ? `${2 / eff}px solid #4B1D6B` : 'none', pointerEvents: 'none', zIndex: 60, boxSizing: 'border-box' }}
               >
                 {corners.map(({ c, cx, cy }) => (
                   <div
