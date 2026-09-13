@@ -73,6 +73,7 @@ export default function Canvas() {
   const gesture = useRef<Gesture>(null)
   const panGesture = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean }>(null)
   const selRef = useRef<HTMLDivElement>(null)
+  const layerRefs = useRef(new Map<string, HTMLDivElement>())
   const [selH, setSelH] = useState(0)
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
   const viewRef = useRef(view)
@@ -573,7 +574,11 @@ export default function Canvas() {
             return (
               <div
                 key={l.id}
-                ref={isSel ? selRef : undefined}
+                ref={(node) => {
+                  if (node) layerRefs.current.set(l.id, node)
+                  else layerRefs.current.delete(l.id)
+                  if (isSel) selRef.current = node
+                }}
           onTouchStart={(e) => {
             e.stopPropagation()
             if (l.locked || editingId === l.id) return
@@ -638,17 +643,24 @@ export default function Canvas() {
             const sel = project.layers.find((l) => l.id === selectedId)
             if (!sel || editingId || sel.locked || !sel.visible) return null
             const isGroup = multiSelectMode && selected.length > 1
+            const renderedHeight = (layer: Layer) => {
+              const node = layerRefs.current.get(layer.id)
+              return layer.type === 'text' ? (node?.offsetHeight || (layer.id === selectedId ? selH : 0) || layer.h) : layer.h
+            }
             const bounds = isGroup
               ? selected.reduce(
-                  (box, layer) => ({
-                    left: Math.min(box.left, layer.x),
-                    top: Math.min(box.top, layer.y),
-                    right: Math.max(box.right, layer.x + layer.w),
-                    bottom: Math.max(box.bottom, layer.y + (layer.type === 'text' ? layer.h : layer.h)),
-                  }),
+                  (box, layer) => {
+                    const height = renderedHeight(layer)
+                    return {
+                      left: Math.min(box.left, layer.x),
+                      top: Math.min(box.top, layer.y),
+                      right: Math.max(box.right, layer.x + layer.w),
+                      bottom: Math.max(box.bottom, layer.y + height),
+                    }
+                  },
                   { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
                 )
-              : { left: sel.x, top: sel.y, right: sel.x + sel.w, bottom: sel.y + (sel.type === 'text' ? (selH || sel.h) : sel.h) }
+              : { left: sel.x, top: sel.y, right: sel.x + sel.w, bottom: sel.y + renderedHeight(sel) }
             const boxW = bounds.right - bounds.left
             const boxH = bounds.bottom - bounds.top
             const size = hs * 3.8
@@ -659,7 +671,7 @@ export default function Canvas() {
               { c: 'bl', cx: 0, cy: boxH },
               { c: 'br', cx: boxW, cy: boxH },
             ]
-            const group = isGroup ? selected.map((layer) => ({ id: layer.id, x: layer.x, y: layer.y, w: layer.w, h: layer.type === 'text' ? (layer.id === selectedId ? selH || layer.h : layer.h) : layer.h, fontSize: layer.type === 'text' ? layer.fontSize : undefined })) : undefined
+            const group = isGroup ? selected.map((layer) => ({ id: layer.id, x: layer.x, y: layer.y, w: layer.w, h: renderedHeight(layer), fontSize: layer.type === 'text' ? layer.fontSize : undefined })) : undefined
             return (
               <div
                 style={{ position: 'absolute', left: bounds.left, top: bounds.top, width: boxW, height: boxH, border: isGroup ? `${2 / eff}px solid #4B1D6B` : 'none', pointerEvents: 'none', zIndex: 60, boxSizing: 'border-box' }}
