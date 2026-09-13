@@ -152,9 +152,9 @@ export default function Canvas() {
           const patch = {
             x: groupX + (item.x - g.ox) * sx,
             y: groupY + (item.y - g.oy) * sx,
-            w: Math.max(20, item.w * sx),
-            h: Math.max(20, item.h * sy),
-          }
+                      w: Math.max(20, item.w * sx),
+                      h: Math.max(20, item.h * sx),
+                    }
           const layer = layersRef.current.find((candidate) => candidate.id === item.id)
           if (layer?.type === 'text' && item.fontSize) {
             updateLayer(item.id, { ...patch, fontSize: Math.max(6, Math.round(item.fontSize * sx)) })
@@ -587,8 +587,17 @@ export default function Canvas() {
               longPress.current = null
             }, 600)
           }}
-          onPointerDown={(e) => startMove(e, l)}
-          onContextMenu={(e) => {
+                onPointerDownCapture={(e) => {
+                  if (
+                    e.pointerType === 'touch' &&
+                    (pinching.current || pinchTouchSequence.current || touchCount.current >= 2 || activeTouches.current.size >= 2)
+                  ) {
+                    e.preventDefault()
+                    e.stopPropagation()
+                  }
+                }}
+                onPointerDown={(e) => startMove(e, l)}
+                onContextMenu={(e) => {
             if (multiSelectModeRef.current) {
               e.preventDefault()
               e.stopPropagation()
