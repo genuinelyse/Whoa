@@ -457,9 +457,11 @@ export default function Canvas() {
       onPointerDownCapture={(e) => {
         if (e.pointerType !== 'touch') return
         if (activeTouches.current.size === 0) touchSelectionLock.current = selectedRef.current
-        activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-        if (activeTouches.current.size >= 2) {
-          e.preventDefault()
+            activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+            touchCount.current = activeTouches.current.size
+            if (activeTouches.current.size >= 2) {
+              pinchTouchSequence.current = true
+              e.preventDefault()
           e.stopPropagation()
         }
         if (activeTouches.current.size < 2 || pinch.current) return
@@ -595,15 +597,19 @@ export default function Canvas() {
               longPress.current = null
             }, 600)
           }}
-                onPointerDownCapture={(e) => {
-                  if (
-                    e.pointerType === 'touch' &&
-                    (pinching.current || pinchTouchSequence.current || touchCount.current >= 2 || activeTouches.current.size >= 2)
-                  ) {
-                    e.preventDefault()
-                    e.stopPropagation()
-                  }
-                }}
+                  onPointerDownCapture={(e) => {
+                    if (e.pointerType !== 'touch') return
+                    if (activeTouches.current.size === 0) {
+                      touchSelectionLock.current = selectedRef.current
+                    }
+                    activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+                    touchCount.current = activeTouches.current.size
+                    if (activeTouches.current.size >= 2) {
+                      pinchTouchSequence.current = true
+                      e.preventDefault()
+                      e.stopPropagation()
+                    }
+                  }}
                 onPointerDown={(e) => startMove(e, l)}
                 onContextMenu={(e) => {
             if (multiSelectModeRef.current) {
@@ -790,9 +796,8 @@ function LayerContent({
       fontWeight: layer.fontWeight,
       color: layer.color,
       textAlign: layer.align,
-      lineHeight: 1,
+      lineHeight: 1.15,
       width: '100%',
-      height: 'fit-content',
       padding: 0,
       // Keep pinch resizing from introducing accidental soft wraps that change
       // the selected text layer's auto height. Explicit line breaks still work.
