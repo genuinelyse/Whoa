@@ -792,6 +792,7 @@ function LayerContent({
       textAlign: layer.align,
       lineHeight: 1.15,
       width: '100%',
+      padding: 0,
       // Keep pinch resizing from introducing accidental soft wraps that change
       // the selected text layer's auto height. Explicit line breaks still work.
       whiteSpace: 'pre',
