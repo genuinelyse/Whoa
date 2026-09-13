@@ -74,8 +74,6 @@ export default function Canvas() {
   const panGesture = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean }>(null)
   const selRef = useRef<HTMLDivElement>(null)
   const [selH, setSelH] = useState(0)
-  const [boundsVersion, setBoundsVersion] = useState(0)
-  const boundsKeyRef = useRef('')
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
   const viewRef = useRef(view)
   viewRef.current = view
@@ -108,20 +106,6 @@ export default function Canvas() {
     ro.observe(el)
     return () => ro.disconnect()
   }, [selectedId, editingId])
-
-  useLayoutEffect(() => {
-    const key = selectedIds
-      .map((id) => {
-        const layer = project.layers.find((item) => item.id === id)
-        const node = layerRefs.current.get(id)
-        return layer ? `${id}:${layer.x}:${layer.y}:${layer.w}:${layer.h}:${node?.offsetWidth || 0}:${node?.offsetHeight || 0}` : id
-      })
-      .join('|')
-    if (key !== boundsKeyRef.current) {
-      boundsKeyRef.current = key
-      setBoundsVersion((version) => version + 1)
-    }
-  }, [project.layers, selectedIds])
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
@@ -654,30 +638,17 @@ export default function Canvas() {
             const sel = project.layers.find((l) => l.id === selectedId)
             if (!sel || editingId || sel.locked || !sel.visible) return null
             const isGroup = multiSelectMode && selected.length > 1
-            const renderedSize = (layer: Layer) => {
-              const node = layerRefs.current.get(layer.id)
-              return {
-                w: Math.max(layer.w, node?.offsetWidth || 0),
-                h: Math.max(layer.h, node?.offsetHeight || 0),
-              }
-            }
             const bounds = isGroup
               ? selected.reduce(
-                  (box, layer) => {
-                    const rendered = renderedSize(layer)
-                    return {
-                      left: Math.min(box.left, layer.x),
-                      top: Math.min(box.top, layer.y),
-                      right: Math.max(box.right, layer.x + rendered.w),
-                      bottom: Math.max(box.bottom, layer.y + rendered.h),
-                    }
-                  },
+                  (box, layer) => ({
+                    left: Math.min(box.left, layer.x),
+                    top: Math.min(box.top, layer.y),
+                    right: Math.max(box.right, layer.x + layer.w),
+                    bottom: Math.max(box.bottom, layer.y + (layer.type === 'text' ? layer.h : layer.h)),
+                  }),
                   { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
                 )
-              : (() => {
-                  const rendered = renderedSize(sel)
-                  return { left: sel.x, top: sel.y, right: sel.x + rendered.w, bottom: sel.y + rendered.h }
-                })()
+              : { left: sel.x, top: sel.y, right: sel.x + sel.w, bottom: sel.y + (sel.type === 'text' ? (selH || sel.h) : sel.h) }
             const boxW = bounds.right - bounds.left
             const boxH = bounds.bottom - bounds.top
             const size = hs * 3.8
@@ -688,13 +659,9 @@ export default function Canvas() {
               { c: 'bl', cx: 0, cy: boxH },
               { c: 'br', cx: boxW, cy: boxH },
             ]
-            const group = isGroup ? selected.map((layer) => {
-              const rendered = renderedSize(layer)
-              return { id: layer.id, x: layer.x, y: layer.y, w: rendered.w, h: rendered.h, fontSize: layer.type === 'text' ? layer.fontSize : undefined }
-            }) : undefined
+            const group = isGroup ? selected.map((layer) => ({ id: layer.id, x: layer.x, y: layer.y, w: layer.w, h: layer.type === 'text' ? (layer.id === selectedId ? selH || layer.h : layer.h) : layer.h, fontSize: layer.type === 'text' ? layer.fontSize : undefined })) : undefined
             return (
               <div
-                data-bounds-version={boundsVersion}
                 style={{ position: 'absolute', left: bounds.left, top: bounds.top, width: boxW, height: boxH, border: isGroup ? `${2 / eff}px solid #4B1D6B` : 'none', pointerEvents: 'none', zIndex: 60, boxSizing: 'border-box' }}
               >
                 {corners.map(({ c, cx, cy }) => (
