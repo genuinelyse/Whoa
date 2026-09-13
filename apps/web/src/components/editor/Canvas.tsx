@@ -50,7 +50,7 @@ const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.cl
 type Corner = 'tl' | 'tr' | 'bl' | 'br'
 type Gesture =
   | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean; group?: { id: string; x: number; y: number }[] }
-  | { id: string; mode: 'resize'; corner: Corner; isText: boolean; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; ofs: number }
+  | { id: string; mode: 'resize'; corner: Corner; isText: boolean; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; ofs: number; group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number }[] }
   | null
 
 type Pinch =
@@ -131,7 +131,8 @@ export default function Canvas() {
         }
         return
       }
-      // resize from a corner
+      // Resize from a corner. Group bounds scale every selected layer from
+      // the opposite corner so their relative positions remain intact.
       const left = g.corner === 'tl' || g.corner === 'bl'
       const top = g.corner === 'tl' || g.corner === 'tr'
       let w = left ? g.ow - dx : g.ow + dx
@@ -140,7 +141,28 @@ export default function Canvas() {
       h = Math.max(20, h)
       const x = left ? g.ox + (g.ow - w) : g.ox
       const y = top ? g.oy + (g.oh - h) : g.oy
-      if (g.isText) {
+      if (g.group) {
+        const factor = Math.min(w / g.ow, h / g.oh)
+        w = Math.max(20, g.ow * factor)
+        h = Math.max(20, g.oh * factor)
+        const groupX = left ? g.ox + (g.ow - w) : g.ox
+        const groupY = top ? g.oy + (g.oh - h) : g.oy
+        const sx = w / g.ow
+        for (const item of g.group) {
+          const patch = {
+            x: groupX + (item.x - g.ox) * sx,
+            y: groupY + (item.y - g.oy) * sx,
+            w: Math.max(20, item.w * sx),
+            h: Math.max(20, item.h * sy),
+          }
+          const layer = layersRef.current.find((candidate) => candidate.id === item.id)
+          if (layer?.type === 'text' && item.fontSize) {
+            updateLayer(item.id, { ...patch, fontSize: Math.max(6, Math.round(item.fontSize * sx)) })
+          } else {
+            updateLayer(item.id, patch)
+          }
+        }
+      } else if (g.isText) {
         const fontSize = Math.max(6, Math.round(g.ofs * (w / g.ow)))
         updateLayer(g.id, { x, y, w, fontSize })
       } else {
@@ -383,14 +405,14 @@ export default function Canvas() {
       : undefined
     gesture.current = { id: l.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: l.h, fromCanvas: false, moved: false, group }
   }
-  const startResize = (e: React.PointerEvent, l: Layer, corner: Corner, boxH: number) => {
+  const startResize = (e: React.PointerEvent, l: Layer, corner: Corner, boxH: number, group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number }[]) => {
     if (pinching.current) return
     e.stopPropagation()
     e.preventDefault()
     e.currentTarget.setPointerCapture?.(e.pointerId)
     gesture.current = {
       id: l.id, mode: 'resize', corner, isText: l.type === 'text',
-      sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: boxH, ofs: l.fontSize || 40,
+      sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: boxH, ofs: l.fontSize || 40, group,
     }
   }
 
@@ -584,28 +606,45 @@ export default function Canvas() {
 
           {/* Selection handles overlay — rendered above all layers so they are never occluded */}
           {(() => {
+            const selected = project.layers.filter((layer) => selectedIds.includes(layer.id) && layer.visible && !layer.locked)
             const sel = project.layers.find((l) => l.id === selectedId)
             if (!sel || editingId || sel.locked || !sel.visible) return null
-            const bh = sel.type === 'text' ? (selH || sel.h) : sel.h
+            const isGroup = multiSelectMode && selected.length > 1
+            const bounds = isGroup
+              ? selected.reduce(
+                  (box, layer) => ({
+                    left: Math.min(box.left, layer.x),
+                    top: Math.min(box.top, layer.y),
+                    right: Math.max(box.right, layer.x + layer.w),
+                    bottom: Math.max(box.bottom, layer.y + (layer.type === 'text' ? layer.h : layer.h)),
+                  }),
+                  { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+                )
+              : { left: sel.x, top: sel.y, right: sel.x + sel.w, bottom: sel.y + (sel.type === 'text' ? (selH || sel.h) : sel.h) }
+            const boxW = bounds.right - bounds.left
+            const boxH = bounds.bottom - bounds.top
             const size = hs * 3.8
             const dot = hs * 1.5
             const corners: { c: Corner; cx: number; cy: number }[] = [
               { c: 'tl', cx: 0, cy: 0 },
-              { c: 'tr', cx: sel.w, cy: 0 },
-              { c: 'bl', cx: 0, cy: bh },
-              { c: 'br', cx: sel.w, cy: bh },
+              { c: 'tr', cx: boxW, cy: 0 },
+              { c: 'bl', cx: 0, cy: boxH },
+              { c: 'br', cx: boxW, cy: boxH },
             ]
+            const group = isGroup ? selected.map((layer) => ({ id: layer.id, x: layer.x, y: layer.y, w: layer.w, h: layer.type === 'text' ? (layer.id === selectedId ? selH || layer.h : layer.h) : layer.h, fontSize: layer.type === 'text' ? layer.fontSize : undefined })) : undefined
             return (
-              <div style={{ position: 'absolute', left: sel.x, top: sel.y, width: sel.w, height: bh, pointerEvents: 'none', zIndex: 60 }}>
+              <div
+                style={{ position: 'absolute', left: bounds.left, top: bounds.top, width: boxW, height: boxH, border: `${2 / eff}px solid #4B1D6B`, pointerEvents: 'none', zIndex: 60, boxSizing: 'border-box' }}
+              >
                 {corners.map(({ c, cx, cy }) => (
                   <div
                     key={c}
-                    data-testid={`resize-${c}-${sel.id}`}
-                    onPointerDown={(e) => startResize(e, sel, c, bh)}
+                    data-testid={`resize-${c}-${isGroup ? 'group' : sel.id}`}
+                    onPointerDown={(e) => startResize(e, sel, c, boxH, group)}
                     style={{
                       position: 'absolute',
                       left: cx - size / 2,
-                      top: cy === bh ? bh - size / 2 : cy - size / 2,
+                      top: cy - size / 2,
                       width: size,
                       height: size,
                       display: 'grid',
