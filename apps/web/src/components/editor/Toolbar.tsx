@@ -2,13 +2,14 @@ import {
   Type, Shapes, Sticker, Image as ImageIcon, Layers as LayersIcon, Palette,
   Copy, Trash2, Wand2, Droplets, AlignLeft, Bold, PaintBucket, Square,
   ArrowUp, ArrowDown, Scissors, Crop,
+  AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignVerticalJustifyCenter,
 } from 'lucide-react'
 import { useEditor } from '#/store/editor'
 
 type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () => void; danger?: boolean }
 
 export default function Toolbar() {
-  const { selected, openTool, deleteLayer, duplicate, reorder } = useEditor()
+  const { selected, selectedIds, alignSelected, openTool, deleteLayer, duplicate, reorder } = useEditor()
 
   let items: Item[] = []
 
@@ -58,12 +59,19 @@ export default function Toolbar() {
     }
   }
 
-  return (
-    <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">
-      {items.map((it) => (
+  const groupItems: Item[] = [
+    { key: 'align-left', label: 'Left', icon: <AlignHorizontalJustifyStart />, onClick: () => alignSelected('left') },
+    { key: 'align-center', label: 'Center', icon: <AlignHorizontalJustifyCenter />, onClick: () => alignSelected('center') },
+    { key: 'align-right', label: 'Right', icon: <AlignHorizontalJustifyEnd />, onClick: () => alignSelected('right') },
+    { key: 'align-middle', label: 'Middle', icon: <AlignVerticalJustifyCenter />, onClick: () => alignSelected('middle') },
+  ]
+  const isGroup = selectedIds.length > 1
+
+  const renderItem = (it: Item) => (
         <button
           key={it.key}
           data-testid={`tool-${it.key}`}
+          aria-label={it.label}
           onClick={() => (it.onClick ? it.onClick() : openTool(it.key))}
           className={`flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-1 rounded-xl transition-colors active:bg-surface2 ${
             it.danger ? 'text-danger' : 'text-txt'
@@ -72,7 +80,16 @@ export default function Toolbar() {
           <span className="[&>svg]:h-5 [&>svg]:w-5">{it.icon}</span>
           <span className="text-[10px] font-medium">{it.label}</span>
         </button>
-      ))}
+      )
+
+  return (
+    <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">
+      <div className={`flex shrink-0 items-center gap-1 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[220px] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
+        {groupItems.map(renderItem)}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {items.map(renderItem)}
+      </div>
     </div>
   )
 }
