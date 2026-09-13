@@ -198,8 +198,6 @@ export default function Canvas() {
     const onTouchStart = (e: TouchEvent) => {
       touchCount.current = e.touches.length
       if (e.touches.length >= 2) {
-        e.preventDefault()
-        e.stopPropagation()
         pinchTouchSequence.current = true
         pinchStartedInMultiSelect.current = multiSelectModeRef.current
         if (!pinchStartedInMultiSelect.current) {
@@ -354,7 +352,7 @@ export default function Canvas() {
       (e.pointerType === 'touch' &&
         (pinchTouchSequence.current || touchCount.current >= 2 ||
           activeTouches.current.size > 1 ||
-          (touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
+          (!multiSelectModeRef.current && touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
       (e.pointerType === 'touch' && pinch.current !== null)
     ) return
     e.stopPropagation()
