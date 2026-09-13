@@ -790,8 +790,9 @@ function LayerContent({
       fontWeight: layer.fontWeight,
       color: layer.color,
       textAlign: layer.align,
-      lineHeight: 1.15,
+      lineHeight: 1,
       width: '100%',
+      height: 'fit-content',
       padding: 0,
       // Keep pinch resizing from introducing accidental soft wraps that change
       // the selected text layer's auto height. Explicit line breaks still work.
