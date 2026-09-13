@@ -338,14 +338,19 @@ export default function Canvas() {
   }, [])
 
   const startMove = (e: React.PointerEvent, l: Layer) => {
-    // A resize owns the active pointer until pointerup, even if the resized
-    // layer now overlaps another layer beneath the pointer.
-    if (gesture.current?.mode === 'resize') {
+    // Once a touch sequence becomes a pinch, neither finger may hit-test or
+    // select another layer while the selected layer is being resized.
+    if (
+      e.pointerType === 'touch' &&
+      (pinching.current || pinchTouchSequence.current || touchCount.current >= 2 || activeTouches.current.size > 1)
+    ) {
       e.stopPropagation()
       e.preventDefault()
       return
     }
-    if (e.pointerType === 'touch' && (pinching.current || activeTouches.current.size > 1)) {
+    // A resize owns the active pointer until pointerup, even if the resized
+    // layer now overlaps another layer beneath the pointer.
+    if (gesture.current?.mode === 'resize') {
       e.stopPropagation()
       e.preventDefault()
       return
