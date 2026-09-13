@@ -49,7 +49,7 @@ const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.cl
 
 type Corner = 'tl' | 'tr' | 'bl' | 'br'
 type Gesture =
-  | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean; group?: { id: string; x: number; y: number }[] }
+  | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean; tapToggleId?: string; group?: { id: string; x: number; y: number }[] }
   | { id: string; mode: 'resize'; corner: Corner; isText: boolean; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; ofs: number; group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number }[] }
   | null
 
@@ -59,7 +59,7 @@ type Pinch =
   | null
 
 export default function Canvas() {
-  const { project, selectedId, selectedIds, select, updateLayer, time, mode, playing } = useEditor()
+  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing } = useEditor()
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [multiSelectMode, setMultiSelectMode] = useState(false)
@@ -175,7 +175,13 @@ export default function Canvas() {
         longPress.current = null
       }
       const g = gesture.current
-      if (g?.mode === 'move' && g.fromCanvas && !g.moved) {
+      if (g?.mode === 'move' && !g.moved && g.tapToggleId) {
+        toggleSelect(g.tapToggleId)
+        if (selectedIdsRef.current.length <= 2) {
+          setMultiSelectMode(false)
+          multiSelectModeRef.current = false
+        }
+      } else if (g?.mode === 'move' && g.fromCanvas && !g.moved) {
         setMultiSelectMode(false)
         multiSelectModeRef.current = false
         select(null)
@@ -189,7 +195,7 @@ export default function Canvas() {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
     }
-  }, [scale, updateLayer])
+  }, [scale, toggleSelect, updateLayer])
 
   // Pinch-to-zoom / pan on the canvas only (prevents whole-page zoom)
   useEffect(() => {
@@ -403,7 +409,20 @@ export default function Canvas() {
     const group = selectedIds.length > 1 && selectedIds.includes(l.id)
       ? project.layers.filter((item) => selectedIds.includes(item.id)).map((item) => ({ id: item.id, x: item.x, y: item.y }))
       : undefined
-    gesture.current = { id: l.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: l.h, fromCanvas: false, moved: false, group }
+    gesture.current = {
+      id: l.id,
+      mode: 'move',
+      sx: e.clientX,
+      sy: e.clientY,
+      ox: l.x,
+      oy: l.y,
+      ow: l.w,
+      oh: l.h,
+      fromCanvas: false,
+      moved: false,
+      tapToggleId: multiSelectModeRef.current && selectedIds.length > 1 && selectedIds.includes(l.id) ? l.id : undefined,
+      group,
+    }
   }
   const startResize = (e: React.PointerEvent, l: Layer, corner: Corner, boxH: number, group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number }[]) => {
     if (pinching.current) return
