@@ -398,7 +398,13 @@ export default function Canvas() {
           activeTouches.current.size > 1 ||
           (touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
       (e.pointerType === 'touch' && pinch.current !== null)
-    ) return
+    ) {
+      if (e.pointerType === 'touch') {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+      return
+    }
     e.stopPropagation()
     if (e.pointerType === 'touch') {
       e.currentTarget.setPointerCapture?.(e.pointerId)
@@ -587,6 +593,11 @@ export default function Canvas() {
           onTouchStart={(e) => {
             e.stopPropagation()
             if (l.locked || editingId === l.id) return
+            if (e.touches.length > 1 || pinchTouchSequence.current || touchCount.current >= 2 || activeTouches.current.size > 1) {
+              if (longPress.current) window.clearTimeout(longPress.current)
+              longPress.current = null
+              return
+            }
             if (multiSelectModeRef.current) return
             if (longPress.current) window.clearTimeout(longPress.current)
             longPress.current = window.setTimeout(() => {
