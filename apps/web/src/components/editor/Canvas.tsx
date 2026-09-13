@@ -338,6 +338,13 @@ export default function Canvas() {
   }, [])
 
   const startMove = (e: React.PointerEvent, l: Layer) => {
+    // A resize owns the active pointer until pointerup, even if the resized
+    // layer now overlaps another layer beneath the pointer.
+    if (gesture.current?.mode === 'resize') {
+      e.stopPropagation()
+      e.preventDefault()
+      return
+    }
     if (e.pointerType === 'touch' && (pinching.current || activeTouches.current.size > 1)) {
       e.stopPropagation()
       e.preventDefault()
@@ -375,6 +382,7 @@ export default function Canvas() {
     if (pinching.current) return
     e.stopPropagation()
     e.preventDefault()
+    e.currentTarget.setPointerCapture?.(e.pointerId)
     gesture.current = {
       id: l.id, mode: 'resize', corner, isText: l.type === 'text',
       sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: boxH, ofs: l.fontSize || 40,
