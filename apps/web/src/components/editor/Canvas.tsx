@@ -63,8 +63,9 @@ export default function Canvas() {
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
  const [multiSelectMode, setMultiSelectMode] = useState(false)
- const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
- const [pinchActive, setPinchActive] = useState(false)
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const marqueeSession = useRef<{ active: boolean; start: { x: number; y: number }; update?: (event: PointerEvent) => void; finish?: (event: PointerEvent) => void }>({ active: false, start: { x: 0, y: 0 } })
+  const [pinchActive, setPinchActive] = useState(false)
   const longPress = useRef<number | null>(null)
   const pendingMultiSelectTap = useRef<number | null>(null)
   const pinchTouchSequence = useRef(false)
@@ -537,7 +538,9 @@ export default function Canvas() {
             })
             const start = toArtboard(e.clientX, e.clientY)
             const marqueeStart = { x: start.x, y: start.y }
+            let longPressTimer: number | null = null
             const updateMarquee = (event: PointerEvent) => {
+              if (!marqueeSession.current.active) return
               const end = toArtboard(event.clientX, event.clientY)
               const box = { left: Math.min(marqueeStart.x, end.x), top: Math.min(marqueeStart.y, end.y), right: Math.max(marqueeStart.x, end.x), bottom: Math.max(marqueeStart.y, end.y) }
               const ids = project.layers.filter((layer) => layer.visible && !layer.locked && layer.x < box.right && layer.x + layer.w > box.left && layer.y < box.bottom && layer.y + layer.h > box.top).map((layer) => layer.id)
@@ -546,21 +549,33 @@ export default function Canvas() {
               else select(null)
             }
             const finishMarquee = (event: PointerEvent) => {
+              if (longPressTimer !== null) window.clearTimeout(longPressTimer)
+              if (!marqueeSession.current.active) {
+                window.removeEventListener('pointermove', updateMarquee)
+                window.removeEventListener('pointerup', finishMarquee)
+                window.removeEventListener('pointercancel', finishMarquee)
+                return
+              }
               const end = toArtboard(event.clientX, event.clientY)
               const box = { left: Math.min(marqueeStart.x, end.x), top: Math.min(marqueeStart.y, end.y), right: Math.max(marqueeStart.x, end.x), bottom: Math.max(marqueeStart.y, end.y) }
               const ids = project.layers.filter((layer) => layer.visible && !layer.locked && layer.x < box.right && layer.x + layer.w > box.left && layer.y < box.bottom && layer.y + layer.h > box.top).map((layer) => layer.id)
               setMarquee(null)
+              marqueeSession.current.active = false
               if (ids.length) select(ids[0], false, ids)
               else select(null)
               window.removeEventListener('pointermove', updateMarquee)
               window.removeEventListener('pointerup', finishMarquee)
               window.removeEventListener('pointercancel', finishMarquee)
             }
-            e.currentTarget.setPointerCapture(e.pointerId)
+            marqueeSession.current = { active: false, start: marqueeStart, update: updateMarquee, finish: finishMarquee }
+            longPressTimer = window.setTimeout(() => {
+              marqueeSession.current.active = true
+              setMarquee({ x: marqueeStart.x, y: marqueeStart.y, w: 0, h: 0 })
+              e.currentTarget.setPointerCapture(e.pointerId)
+            }, 450)
             window.addEventListener('pointermove', updateMarquee)
             window.addEventListener('pointerup', finishMarquee)
             window.addEventListener('pointercancel', finishMarquee)
-            e.preventDefault()
             return
           }
           void rect
