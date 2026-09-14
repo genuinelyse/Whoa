@@ -24,9 +24,9 @@ export default function App() {
   }, [])
 
   return (
-    <div className="flex h-full w-full items-stretch justify-center bg-black sm:py-4">
+    <div className="flex h-[100dvh] min-h-[100dvh] w-full items-stretch justify-center overflow-hidden bg-black sm:py-4">
       {/* Mobile device frame — mobile-first, centered on larger screens */}
-      <div className="relative h-full w-full max-w-[440px] overflow-hidden bg-bg text-txt shadow-2xl sm:h-[900px] sm:max-h-full sm:rounded-[2.2rem] sm:ring-1 sm:ring-white/10">
+      <div className="relative h-[100dvh] min-h-0 w-full max-w-[440px] overflow-hidden bg-bg text-txt shadow-2xl sm:h-[900px] sm:max-h-full sm:rounded-[2.2rem] sm:ring-1 sm:ring-white/10">
         {project ? (
           <Editor key={project.id} project={project} onExit={close} />
         ) : (

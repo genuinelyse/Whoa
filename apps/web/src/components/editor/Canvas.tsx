@@ -49,8 +49,8 @@ const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.cl
 
 type Corner = 'tl' | 'tr' | 'bl' | 'br'
 type Gesture =
-  | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean; group?: { id: string; x: number; y: number }[] }
-  | { id: string; mode: 'resize'; corner: Corner; isText: boolean; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; ofs: number }
+  | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean; tapToggleId?: string; group?: { id: string; x: number; y: number }[] }
+  | { id: string; mode: 'resize'; corner: Corner; isText: boolean; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; ofs: number; group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number }[] }
   | null
 
 type Pinch =
@@ -59,10 +59,12 @@ type Pinch =
   | null
 
 export default function Canvas() {
-  const { project, selectedId, selectedIds, select, updateLayer, time, mode, playing } = useEditor()
+  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing } = useEditor()
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [multiSelectMode, setMultiSelectMode] = useState(false)
+ const [multiSelectMode, setMultiSelectMode] = useState(false)
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const marqueeSession = useRef<{ active: boolean; start: { x: number; y: number }; update?: (event: PointerEvent) => void; finish?: (event: PointerEvent) => void }>({ active: false, start: { x: 0, y: 0 } })
   const [pinchActive, setPinchActive] = useState(false)
   const longPress = useRef<number | null>(null)
   const pendingMultiSelectTap = useRef<number | null>(null)
@@ -73,6 +75,7 @@ export default function Canvas() {
   const gesture = useRef<Gesture>(null)
   const panGesture = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean }>(null)
   const selRef = useRef<HTMLDivElement>(null)
+  const layerRefs = useRef(new Map<string, HTMLDivElement>())
   const [selH, setSelH] = useState(0)
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
   const viewRef = useRef(view)
@@ -131,7 +134,8 @@ export default function Canvas() {
         }
         return
       }
-      // resize from a corner
+      // Resize from a corner. Group bounds scale every selected layer from
+      // the opposite corner so their relative positions remain intact.
       const left = g.corner === 'tl' || g.corner === 'bl'
       const top = g.corner === 'tl' || g.corner === 'tr'
       let w = left ? g.ow - dx : g.ow + dx
@@ -140,7 +144,28 @@ export default function Canvas() {
       h = Math.max(20, h)
       const x = left ? g.ox + (g.ow - w) : g.ox
       const y = top ? g.oy + (g.oh - h) : g.oy
-      if (g.isText) {
+      if (g.group) {
+        const factor = Math.min(w / g.ow, h / g.oh)
+        w = Math.max(20, g.ow * factor)
+        h = Math.max(20, g.oh * factor)
+        const groupX = left ? g.ox + (g.ow - w) : g.ox
+        const groupY = top ? g.oy + (g.oh - h) : g.oy
+        const sx = w / g.ow
+        for (const item of g.group) {
+          const patch = {
+            x: groupX + (item.x - g.ox) * sx,
+            y: groupY + (item.y - g.oy) * sx,
+                      w: Math.max(20, item.w * sx),
+                      h: Math.max(20, item.h * sx),
+                    }
+          const layer = layersRef.current.find((candidate) => candidate.id === item.id)
+          if (layer?.type === 'text' && item.fontSize) {
+            updateLayer(item.id, { ...patch, fontSize: Math.max(6, Math.round(item.fontSize * sx)) })
+          } else {
+            updateLayer(item.id, patch)
+          }
+        }
+      } else if (g.isText) {
         const fontSize = Math.max(6, Math.round(g.ofs * (w / g.ow)))
         updateLayer(g.id, { x, y, w, fontSize })
       } else {
@@ -153,7 +178,13 @@ export default function Canvas() {
         longPress.current = null
       }
       const g = gesture.current
-      if (g?.mode === 'move' && g.fromCanvas && !g.moved) {
+      if (g?.mode === 'move' && !g.moved && g.tapToggleId) {
+        toggleSelect(g.tapToggleId)
+        if (selectedIdsRef.current.length <= 2) {
+          setMultiSelectMode(false)
+          multiSelectModeRef.current = false
+        }
+      } else if (g?.mode === 'move' && g.fromCanvas && !g.moved) {
         setMultiSelectMode(false)
         multiSelectModeRef.current = false
         select(null)
@@ -167,7 +198,7 @@ export default function Canvas() {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
     }
-  }, [scale, updateLayer])
+  }, [scale, toggleSelect, updateLayer])
 
   // Pinch-to-zoom / pan on the canvas only (prevents whole-page zoom)
   useEffect(() => {
@@ -312,6 +343,9 @@ export default function Canvas() {
         }
         pinchStartedInMultiSelect.current = false
       }
+      // Keep the touch sequence locked while one finger remains down. Safari
+      // can send that remaining finger over another layer before the final
+      // touchend, which must not start a new selection.
       if (e.touches.length === 0) {
         touchSelectionLock.current = null
         pinchTouchSequence.current = false
@@ -366,7 +400,13 @@ export default function Canvas() {
           activeTouches.current.size > 1 ||
           (!multiSelectModeRef.current && touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
       (e.pointerType === 'touch' && pinch.current !== null)
-    ) return
+    ) {
+      if (e.pointerType === 'touch') {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+      return
+    }
     e.stopPropagation()
     if (e.pointerType === 'touch') {
       e.currentTarget.setPointerCapture?.(e.pointerId)
@@ -381,16 +421,29 @@ export default function Canvas() {
     const group = selectedIds.length > 1 && selectedIds.includes(l.id)
       ? project.layers.filter((item) => selectedIds.includes(item.id)).map((item) => ({ id: item.id, x: item.x, y: item.y }))
       : undefined
-    gesture.current = { id: l.id, mode: 'move', sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: l.h, fromCanvas: false, moved: false, group }
+    gesture.current = {
+      id: l.id,
+      mode: 'move',
+      sx: e.clientX,
+      sy: e.clientY,
+      ox: l.x,
+      oy: l.y,
+      ow: l.w,
+      oh: l.h,
+      fromCanvas: false,
+      moved: false,
+      tapToggleId: multiSelectModeRef.current && selectedIds.length > 1 && selectedIds.includes(l.id) ? l.id : undefined,
+      group,
+    }
   }
-  const startResize = (e: React.PointerEvent, l: Layer, corner: Corner, boxH: number) => {
+  const startResize = (e: React.PointerEvent, l: Layer, corner: Corner, boxH: number, group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number }[]) => {
     if (pinching.current) return
     e.stopPropagation()
     e.preventDefault()
     e.currentTarget.setPointerCapture?.(e.pointerId)
     gesture.current = {
       id: l.id, mode: 'resize', corner, isText: l.type === 'text',
-      sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: boxH, ofs: l.fontSize || 40,
+      sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: boxH, ofs: l.fontSize || 40, group,
     }
   }
 
@@ -412,9 +465,11 @@ export default function Canvas() {
       onPointerDownCapture={(e) => {
         if (e.pointerType !== 'touch') return
         if (activeTouches.current.size === 0) touchSelectionLock.current = selectedRef.current
-        activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-        if (activeTouches.current.size >= 2) {
-          e.preventDefault()
+            activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+            touchCount.current = activeTouches.current.size
+            if (activeTouches.current.size >= 2) {
+              pinchTouchSequence.current = true
+              e.preventDefault()
           e.stopPropagation()
         }
         if (activeTouches.current.size < 2 || pinch.current) return
@@ -469,6 +524,69 @@ export default function Canvas() {
         }
       }}
       onPointerDown={(e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return
+        const target = e.target as HTMLElement
+        const hitLayer = target.closest('[data-testid^="layer-"]')
+        if (!hitLayer && !pinching.current && !(e.pointerType === 'touch' && activeTouches.current.size > 1) && !(e.pointerType === 'touch' && multiSelectModeRef.current && selectedIds.length > 1) && !(e.pointerType === 'touch' && !multiSelectModeRef.current && selectedIds.length === 1)) {
+          const rect = e.currentTarget.getBoundingClientRect()
+          const v = viewRef.current
+          const artboard = e.currentTarget.querySelector('[data-testid="artboard"]')?.getBoundingClientRect()
+          if (artboard) {
+            const toArtboard = (clientX: number, clientY: number) => ({
+              x: (clientX - artboard.left) / (scale * v.scale),
+              y: (clientY - artboard.top) / (scale * v.scale),
+            })
+            const start = toArtboard(e.clientX, e.clientY)
+            const marqueeStart = { x: start.x, y: start.y }
+            let longPressTimer: number | null = null
+            const updateMarquee = (event: PointerEvent) => {
+              if (!marqueeSession.current.active) return
+              const end = toArtboard(event.clientX, event.clientY)
+              const box = { left: Math.min(marqueeStart.x, end.x), top: Math.min(marqueeStart.y, end.y), right: Math.max(marqueeStart.x, end.x), bottom: Math.max(marqueeStart.y, end.y) }
+              const ids = project.layers.filter((layer) => layer.visible && !layer.locked && layer.x < box.right && layer.x + layer.w > box.left && layer.y < box.bottom && layer.y + layer.h > box.top).map((layer) => layer.id)
+              setMarquee({ x: box.left, y: box.top, w: box.right - box.left, h: box.bottom - box.top })
+              if (ids.length) select(ids[0], false, ids)
+              else select(null)
+            }
+            const finishMarquee = (event: PointerEvent) => {
+              if (longPressTimer !== null) window.clearTimeout(longPressTimer)
+              if (!marqueeSession.current.active) {
+                // A short tap on empty artboard space is a deselect, not a
+                // marquee gesture. Only a completed long press owns the drag.
+                setMarquee(null)
+                marqueeSession.current.active = false
+                setMultiSelectMode(false)
+                multiSelectModeRef.current = false
+                select(null)
+                window.removeEventListener('pointermove', updateMarquee)
+                window.removeEventListener('pointerup', finishMarquee)
+                window.removeEventListener('pointercancel', finishMarquee)
+                return
+              }
+              const end = toArtboard(event.clientX, event.clientY)
+              const box = { left: Math.min(marqueeStart.x, end.x), top: Math.min(marqueeStart.y, end.y), right: Math.max(marqueeStart.x, end.x), bottom: Math.max(marqueeStart.y, end.y) }
+              const ids = project.layers.filter((layer) => layer.visible && !layer.locked && layer.x < box.right && layer.x + layer.w > box.left && layer.y < box.bottom && layer.y + layer.h > box.top).map((layer) => layer.id)
+              setMarquee(null)
+              marqueeSession.current.active = false
+              if (ids.length) select(ids[0], false, ids)
+              else select(null)
+              window.removeEventListener('pointermove', updateMarquee)
+              window.removeEventListener('pointerup', finishMarquee)
+              window.removeEventListener('pointercancel', finishMarquee)
+            }
+            marqueeSession.current = { active: false, start: marqueeStart, update: updateMarquee, finish: finishMarquee }
+            longPressTimer = window.setTimeout(() => {
+              marqueeSession.current.active = true
+              setMarquee({ x: marqueeStart.x, y: marqueeStart.y, w: 0, h: 0 })
+              e.currentTarget.setPointerCapture(e.pointerId)
+            }, 450)
+            window.addEventListener('pointermove', updateMarquee)
+            window.addEventListener('pointerup', finishMarquee)
+            window.addEventListener('pointercancel', finishMarquee)
+            return
+          }
+          void rect
+        }
         // The second touch belongs to the active pinch. A first touch on the
         // background starts a deferred move for the selected layer: it becomes
         // a deselect on tap, or a drag when the pointer actually moves.
@@ -532,10 +650,19 @@ export default function Canvas() {
             return (
               <div
                 key={l.id}
-                ref={isSel ? selRef : undefined}
+                ref={(node) => {
+                  if (node) layerRefs.current.set(l.id, node)
+                  else layerRefs.current.delete(l.id)
+                  if (isSel) selRef.current = node
+                }}
           onTouchStart={(e) => {
             e.stopPropagation()
             if (l.locked || editingId === l.id) return
+            if (e.touches.length > 1 || pinchTouchSequence.current || touchCount.current >= 2 || activeTouches.current.size > 1) {
+              if (longPress.current) window.clearTimeout(longPress.current)
+              longPress.current = null
+              return
+            }
             if (multiSelectModeRef.current) return
             if (longPress.current) window.clearTimeout(longPress.current)
             longPress.current = window.setTimeout(() => {
@@ -546,8 +673,21 @@ export default function Canvas() {
               longPress.current = null
             }, 600)
           }}
-          onPointerDown={(e) => startMove(e, l)}
-          onContextMenu={(e) => {
+                  onPointerDownCapture={(e) => {
+                    if (e.pointerType !== 'touch') return
+                    if (activeTouches.current.size === 0 && !multiSelectModeRef.current) {
+                      touchSelectionLock.current = selectedRef.current
+                    }
+                    activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+                    touchCount.current = activeTouches.current.size
+                    if (activeTouches.current.size >= 2) {
+                      pinchTouchSequence.current = true
+                      e.preventDefault()
+                      e.stopPropagation()
+                    }
+                  }}
+                onPointerDown={(e) => startMove(e, l)}
+                onContextMenu={(e) => {
             if (multiSelectModeRef.current) {
               e.preventDefault()
               e.stopPropagation()
@@ -566,8 +706,8 @@ export default function Canvas() {
                   height: l.type === 'text' ? 'auto' : l.h,
                   opacity: a.opacity,
                   transform: a.transform,
-                  outline: isSel ? `${2 / eff}px solid ${multiSelectMode && !pinchActive ? '#4B1D6B' : '#007AFF'}` : 'none',
-                  outlineOffset: multiSelectMode && !pinchActive ? 2 / eff : 0,
+                  outline: isSel ? `${2 / eff}px solid ${selectedIds.length > 1 && !pinchActive ? '#4B1D6B' : '#007AFF'}` : 'none',
+                  outlineOffset: selectedIds.length > 1 && !pinchActive ? 2 / eff : 0,
                   cursor: l.locked ? 'default' : 'move',
                   touchAction: 'none',
                 }}
@@ -584,28 +724,58 @@ export default function Canvas() {
 
           {/* Selection handles overlay — rendered above all layers so they are never occluded */}
           {(() => {
+            const selected = project.layers.filter((layer) => selectedIds.includes(layer.id) && layer.visible && !layer.locked)
             const sel = project.layers.find((l) => l.id === selectedId)
             if (!sel || editingId || sel.locked || !sel.visible) return null
-            const bh = sel.type === 'text' ? (selH || sel.h) : sel.h
+            const isGroup = selected.length > 1
+            const measured = (layer: Layer) => {
+              const node = layerRefs.current.get(layer.id)
+              return {
+                x: node?.offsetLeft ?? layer.x,
+                y: node?.offsetTop ?? layer.y,
+                w: node?.offsetWidth || layer.w,
+                h: node?.offsetHeight || (layer.type === 'text' ? (layer.id === selectedId ? selH : 0) || layer.h : layer.h),
+              }
+            }
+            const bounds = selected.reduce(
+              (box, layer) => {
+                const rect = measured(layer)
+                return {
+                  left: Math.min(box.left, rect.x),
+                  top: Math.min(box.top, rect.y),
+                  right: Math.max(box.right, rect.x + rect.w),
+                  bottom: Math.max(box.bottom, rect.y + rect.h),
+                }
+              },
+              { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+            )
+            const boxW = bounds.right - bounds.left
+            const boxH = bounds.bottom - bounds.top
             const size = hs * 3.8
             const dot = hs * 1.5
             const corners: { c: Corner; cx: number; cy: number }[] = [
               { c: 'tl', cx: 0, cy: 0 },
-              { c: 'tr', cx: sel.w, cy: 0 },
-              { c: 'bl', cx: 0, cy: bh },
-              { c: 'br', cx: sel.w, cy: bh },
+              { c: 'tr', cx: boxW, cy: 0 },
+              { c: 'bl', cx: 0, cy: boxH },
+              { c: 'br', cx: boxW, cy: boxH },
             ]
+            const group = isGroup ? selected.map((layer) => {
+              const rect = measured(layer)
+              return { id: layer.id, x: rect.x, y: rect.y, w: rect.w, h: rect.h, fontSize: layer.type === 'text' ? layer.fontSize : undefined }
+            }) : undefined
             return (
-              <div style={{ position: 'absolute', left: sel.x, top: sel.y, width: sel.w, height: bh, pointerEvents: 'none', zIndex: 60 }}>
+              <div
+                style={{ position: 'absolute', left: bounds.left, top: bounds.top, width: boxW, height: boxH, border: isGroup ? `${2 / eff}px solid #4B1D6B` : 'none', pointerEvents: 'none', zIndex: 60, boxSizing: 'border-box' }}
+              >
                 {corners.map(({ c, cx, cy }) => (
                   <div
                     key={c}
-                    data-testid={`resize-${c}-${sel.id}`}
-                    onPointerDown={(e) => startResize(e, sel, c, bh)}
+                    data-testid={`resize-${c}-${isGroup ? 'group' : sel.id}`}
+                    onPointerDown={(e) => startResize(e, sel, c, boxH, group)}
                     style={{
                       position: 'absolute',
                       left: cx - size / 2,
-                      top: cy === bh ? bh - size / 2 : cy - size / 2,
+                      top: cy - size / 2,
                       width: size,
                       height: size,
                       display: 'grid',
@@ -623,6 +793,14 @@ export default function Canvas() {
           })()}
         </div>
         </div>
+      )}
+
+      {marquee && (
+        <div
+          aria-hidden="true"
+          data-testid="marquee-selection"
+          style={{ position: 'absolute', left: marquee.x * scale * view.scale + view.x + (size.w - preset.w * scale * view.scale) / 2, top: marquee.y * scale * view.scale + view.y + (size.h - preset.h * scale * view.scale) / 2, width: marquee.w * scale * view.scale, height: marquee.h * scale * view.scale, border: '1px solid #007AFF', background: 'rgba(0,122,255,0.12)', pointerEvents: 'none', zIndex: 80 }}
+        />
       )}
 
       {view.scale !== 1 && (
@@ -704,6 +882,7 @@ function LayerContent({
       textAlign: layer.align,
       lineHeight: 1.15,
       width: '100%',
+      padding: 0,
       // Keep pinch resizing from introducing accidental soft wraps that change
       // the selected text layer's auto height. Explicit line breaks still work.
       whiteSpace: 'pre',

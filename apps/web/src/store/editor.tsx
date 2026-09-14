@@ -12,8 +12,9 @@ interface State {
 }
 
 type Action =
-  | { t: 'select'; id: string | null; additive?: boolean }
+  | { t: 'select'; id: string | null; additive?: boolean; ids?: string[] }
   | { t: 'toggleSelect'; id: string }
+  | { t: 'alignSelected'; mode: 'left' | 'center' | 'right' | 'middle' }
   | { t: 'tool'; tool: string | null }
   | { t: 'addLayer'; layer: Layer }
   | { t: 'updateLayer'; id: string; patch: Partial<Layer> }
@@ -38,13 +39,28 @@ function reducer(state: State, a: Action): State {
       return {
         ...state,
         selectedId: a.id,
-        selectedIds: a.id ? (a.additive ? Array.from(new Set([...state.selectedIds, a.id])) : [a.id]) : [],
+        selectedIds: a.id ? (a.ids ?? (a.additive ? Array.from(new Set([...state.selectedIds, a.id])) : [a.id])) : [],
       }
     case 'toggleSelect': {
       const selectedIds = state.selectedIds.includes(a.id)
         ? state.selectedIds.filter((id) => id !== a.id)
         : [...state.selectedIds, a.id]
       return { ...state, selectedIds, selectedId: selectedIds.at(-1) ?? null }
+    }
+    case 'alignSelected': {
+      const selected = p.layers.filter((layer) => state.selectedIds.includes(layer.id))
+      if (selected.length < 2) return state
+      const left = Math.min(...selected.map((layer) => layer.x))
+      const right = Math.max(...selected.map((layer) => layer.x + layer.w))
+      const top = Math.min(...selected.map((layer) => layer.y))
+      const bottom = Math.max(...selected.map((layer) => layer.y + layer.h))
+      const layers = p.layers.map((layer) => {
+        if (!state.selectedIds.includes(layer.id)) return layer
+        const x = a.mode === 'left' ? left : a.mode === 'right' ? right - layer.w : a.mode === 'center' ? (left + right - layer.w) / 2 : layer.x
+        const y = a.mode === 'middle' ? (top + bottom - layer.h) / 2 : layer.y
+        return { ...layer, x, y }
+      })
+      return { ...state, project: touch({ ...p, layers }) }
     }
     case 'tool':
       return { ...state, tool: a.tool }
@@ -96,8 +112,9 @@ interface Ctx extends State {
   mode: 'static' | 'animated'
   selected: Layer | null
   selectedIds: string[]
-  select: (id: string | null, additive?: boolean) => void
+  select: (id: string | null, additive?: boolean, ids?: string[]) => void
   toggleSelect: (id: string) => void
+  alignSelected: (mode: 'left' | 'center' | 'right' | 'middle') => void
   openTool: (tool: string | null) => void
   addLayer: (type: LayerType, extra?: Partial<Layer>) => void
   updateLayer: (id: string, patch: Partial<Layer>) => void
@@ -117,8 +134,9 @@ const EditorCtx = createContext<Ctx | null>(null)
 export function EditorProvider({ project, children }: { project: Project; children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false })
 
-  const select = useCallback((id: string | null, additive = false) => dispatch({ t: 'select', id, additive }), [])
+  const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
+  const alignSelected = useCallback((mode: 'left' | 'center' | 'right' | 'middle') => dispatch({ t: 'alignSelected', mode }), [])
   const openTool = useCallback((tool: string | null) => dispatch({ t: 'tool', tool }), [])
   const updateLayer = useCallback((id: string, patch: Partial<Layer>) => dispatch({ t: 'updateLayer', id, patch }), [])
   const deleteLayer = useCallback((id: string) => dispatch({ t: 'deleteLayer', id }), [])
@@ -146,10 +164,10 @@ export function EditorProvider({ project, children }: { project: Project; childr
       mode: state.project.mode,
       selected: state.project.layers.find((l) => l.id === state.selectedId) || null,
       selectedIds: state.selectedIds,
-      select, toggleSelect, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder,
+      select, toggleSelect, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder,
       setBackground, setTime, setPlaying, setMode, rename, setDuration,
     }),
-    [state, select, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder, setBackground, setTime, setPlaying, setMode, rename, setDuration],
+    [state, select, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder, setBackground, setTime, setPlaying, setMode, rename, setDuration],
   )
 
   return <EditorCtx.Provider value={value}>{children}</EditorCtx.Provider>
