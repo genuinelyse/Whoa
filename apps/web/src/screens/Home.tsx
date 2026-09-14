@@ -21,7 +21,7 @@ export default function Home({ onOpen }: { onOpen: (p: Project) => void }) {
   const [picker, setPicker] = useState(false)
 
   return (
-    <div className="h-full overflow-y-auto no-scrollbar bg-bg" data-testid="home-screen">
+    <div className="h-full min-h-0 overscroll-contain overflow-y-auto overscroll-y-contain no-scrollbar bg-bg" data-testid="home-screen">
       {/* Header */}
       <header className="sticky top-0 z-20 flex items-center justify-between px-5 pt-6 pb-4 bg-bg/85 backdrop-blur-md">
         <div className="flex items-center gap-2">
