@@ -396,7 +396,7 @@ export default function Canvas() {
       (e.pointerType === 'touch' &&
         (pinchTouchSequence.current || touchCount.current >= 2 ||
           activeTouches.current.size > 1 ||
-          (touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
+          (!multiSelectModeRef.current && touchSelectionLock.current !== null && touchSelectionLock.current !== l.id))) ||
       (e.pointerType === 'touch' && pinch.current !== null)
     ) {
       if (e.pointerType === 'touch') {
@@ -610,7 +610,7 @@ export default function Canvas() {
           }}
                   onPointerDownCapture={(e) => {
                     if (e.pointerType !== 'touch') return
-                    if (activeTouches.current.size === 0) {
+                    if (activeTouches.current.size === 0 && !multiSelectModeRef.current) {
                       touchSelectionLock.current = selectedRef.current
                     }
                     activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
