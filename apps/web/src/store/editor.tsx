@@ -12,7 +12,7 @@ interface State {
 }
 
 type Action =
-  | { t: 'select'; id: string | null; additive?: boolean }
+  | { t: 'select'; id: string | null; additive?: boolean; ids?: string[] }
   | { t: 'toggleSelect'; id: string }
   | { t: 'alignSelected'; mode: 'left' | 'center' | 'right' | 'middle' }
   | { t: 'tool'; tool: string | null }
@@ -39,7 +39,7 @@ function reducer(state: State, a: Action): State {
       return {
         ...state,
         selectedId: a.id,
-        selectedIds: a.id ? (a.additive ? Array.from(new Set([...state.selectedIds, a.id])) : [a.id]) : [],
+        selectedIds: a.id ? (a.ids ?? (a.additive ? Array.from(new Set([...state.selectedIds, a.id])) : [a.id])) : [],
       }
     case 'toggleSelect': {
       const selectedIds = state.selectedIds.includes(a.id)
@@ -112,7 +112,7 @@ interface Ctx extends State {
   mode: 'static' | 'animated'
   selected: Layer | null
   selectedIds: string[]
-  select: (id: string | null, additive?: boolean) => void
+  select: (id: string | null, additive?: boolean, ids?: string[]) => void
   toggleSelect: (id: string) => void
   alignSelected: (mode: 'left' | 'center' | 'right' | 'middle') => void
   openTool: (tool: string | null) => void
@@ -134,7 +134,7 @@ const EditorCtx = createContext<Ctx | null>(null)
 export function EditorProvider({ project, children }: { project: Project; children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false })
 
-  const select = useCallback((id: string | null, additive = false) => dispatch({ t: 'select', id, additive }), [])
+  const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
   const alignSelected = useCallback((mode: 'left' | 'center' | 'right' | 'middle') => dispatch({ t: 'alignSelected', mode }), [])
   const openTool = useCallback((tool: string | null) => dispatch({ t: 'tool', tool }), [])

@@ -539,7 +539,11 @@ export default function Canvas() {
             const marqueeStart = { x: start.x, y: start.y }
             const updateMarquee = (event: PointerEvent) => {
               const end = toArtboard(event.clientX, event.clientY)
-              setMarquee({ x: Math.min(marqueeStart.x, end.x), y: Math.min(marqueeStart.y, end.y), w: Math.abs(end.x - marqueeStart.x), h: Math.abs(end.y - marqueeStart.y) })
+              const box = { left: Math.min(marqueeStart.x, end.x), top: Math.min(marqueeStart.y, end.y), right: Math.max(marqueeStart.x, end.x), bottom: Math.max(marqueeStart.y, end.y) }
+              const ids = project.layers.filter((layer) => layer.visible && !layer.locked && layer.x < box.right && layer.x + layer.w > box.left && layer.y < box.bottom && layer.y + layer.h > box.top).map((layer) => layer.id)
+              setMarquee({ x: box.left, y: box.top, w: box.right - box.left, h: box.bottom - box.top })
+              if (ids.length) select(ids[0], false, ids)
+              else select(null)
             }
             const finishMarquee = (event: PointerEvent) => {
               const end = toArtboard(event.clientX, event.clientY)
