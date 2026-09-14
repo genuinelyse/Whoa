@@ -551,6 +551,13 @@ export default function Canvas() {
             const finishMarquee = (event: PointerEvent) => {
               if (longPressTimer !== null) window.clearTimeout(longPressTimer)
               if (!marqueeSession.current.active) {
+                // A short tap on empty artboard space is a deselect, not a
+                // marquee gesture. Only a completed long press owns the drag.
+                setMarquee(null)
+                marqueeSession.current.active = false
+                setMultiSelectMode(false)
+                multiSelectModeRef.current = false
+                select(null)
                 window.removeEventListener('pointermove', updateMarquee)
                 window.removeEventListener('pointerup', finishMarquee)
                 window.removeEventListener('pointercancel', finishMarquee)
