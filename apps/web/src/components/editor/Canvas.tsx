@@ -706,8 +706,8 @@ export default function Canvas() {
                   height: l.type === 'text' ? 'auto' : l.h,
                   opacity: a.opacity,
                   transform: a.transform,
-                  outline: isSel ? `${2 / eff}px solid ${multiSelectMode && !pinchActive ? '#4B1D6B' : '#007AFF'}` : 'none',
-                  outlineOffset: multiSelectMode && !pinchActive ? 2 / eff : 0,
+                  outline: isSel ? `${2 / eff}px solid ${selectedIds.length > 1 && !pinchActive ? '#4B1D6B' : '#007AFF'}` : 'none',
+                  outlineOffset: selectedIds.length > 1 && !pinchActive ? 2 / eff : 0,
                   cursor: l.locked ? 'default' : 'move',
                   touchAction: 'none',
                 }}
@@ -727,7 +727,7 @@ export default function Canvas() {
             const selected = project.layers.filter((layer) => selectedIds.includes(layer.id) && layer.visible && !layer.locked)
             const sel = project.layers.find((l) => l.id === selectedId)
             if (!sel || editingId || sel.locked || !sel.visible) return null
-            const isGroup = multiSelectMode && selected.length > 1
+            const isGroup = selected.length > 1
             const measured = (layer: Layer) => {
               const node = layerRefs.current.get(layer.id)
               return {
