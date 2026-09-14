@@ -527,7 +527,7 @@ export default function Canvas() {
         if (e.pointerType === 'mouse' && e.button !== 0) return
         const target = e.target as HTMLElement
         const hitLayer = target.closest('[data-testid^="layer-"]')
-        if (!hitLayer && !pinching.current && !(e.pointerType === 'touch' && activeTouches.current.size > 1)) {
+        if (!hitLayer && !pinching.current && !(e.pointerType === 'touch' && activeTouches.current.size > 1) && !(e.pointerType === 'touch' && multiSelectModeRef.current && selectedIds.length > 1)) {
           const rect = e.currentTarget.getBoundingClientRect()
           const v = viewRef.current
           const artboard = e.currentTarget.querySelector('[data-testid="artboard"]')?.getBoundingClientRect()
