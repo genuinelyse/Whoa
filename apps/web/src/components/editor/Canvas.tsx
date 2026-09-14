@@ -62,8 +62,9 @@ export default function Canvas() {
   const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing } = useEditor()
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [multiSelectMode, setMultiSelectMode] = useState(false)
-  const [pinchActive, setPinchActive] = useState(false)
+ const [multiSelectMode, setMultiSelectMode] = useState(false)
+ const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+ const [pinchActive, setPinchActive] = useState(false)
   const longPress = useRef<number | null>(null)
   const pendingMultiSelectTap = useRef<number | null>(null)
   const pinchTouchSequence = useRef(false)
@@ -522,6 +523,44 @@ export default function Canvas() {
         }
       }}
       onPointerDown={(e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return
+        const target = e.target as HTMLElement
+        const hitLayer = target.closest('[data-testid^="layer-"]')
+        if (!hitLayer && !pinching.current && !(e.pointerType === 'touch' && activeTouches.current.size > 1)) {
+          const rect = e.currentTarget.getBoundingClientRect()
+          const v = viewRef.current
+          const artboard = e.currentTarget.querySelector('[data-testid="artboard"]')?.getBoundingClientRect()
+          if (artboard) {
+            const toArtboard = (clientX: number, clientY: number) => ({
+              x: (clientX - artboard.left) / (scale * v.scale),
+              y: (clientY - artboard.top) / (scale * v.scale),
+            })
+            const start = toArtboard(e.clientX, e.clientY)
+            const marqueeStart = { x: start.x, y: start.y }
+            const updateMarquee = (event: PointerEvent) => {
+              const end = toArtboard(event.clientX, event.clientY)
+              setMarquee({ x: Math.min(marqueeStart.x, end.x), y: Math.min(marqueeStart.y, end.y), w: Math.abs(end.x - marqueeStart.x), h: Math.abs(end.y - marqueeStart.y) })
+            }
+            const finishMarquee = (event: PointerEvent) => {
+              const end = toArtboard(event.clientX, event.clientY)
+              const box = { left: Math.min(marqueeStart.x, end.x), top: Math.min(marqueeStart.y, end.y), right: Math.max(marqueeStart.x, end.x), bottom: Math.max(marqueeStart.y, end.y) }
+              const ids = project.layers.filter((layer) => layer.visible && !layer.locked && layer.x < box.right && layer.x + layer.w > box.left && layer.y < box.bottom && layer.y + layer.h > box.top).map((layer) => layer.id)
+              setMarquee(null)
+              if (ids.length) select(ids[0], false, ids)
+              else select(null)
+              window.removeEventListener('pointermove', updateMarquee)
+              window.removeEventListener('pointerup', finishMarquee)
+              window.removeEventListener('pointercancel', finishMarquee)
+            }
+            e.currentTarget.setPointerCapture(e.pointerId)
+            window.addEventListener('pointermove', updateMarquee)
+            window.addEventListener('pointerup', finishMarquee)
+            window.addEventListener('pointercancel', finishMarquee)
+            e.preventDefault()
+            return
+          }
+          void rect
+        }
         // The second touch belongs to the active pinch. A first touch on the
         // background starts a deferred move for the selected layer: it becomes
         // a deselect on tap, or a drag when the pointer actually moves.
@@ -728,6 +767,14 @@ export default function Canvas() {
           })()}
         </div>
         </div>
+      )}
+
+      {marquee && (
+        <div
+          aria-hidden="true"
+          data-testid="marquee-selection"
+          style={{ position: 'absolute', left: marquee.x * scale * view.scale + view.x + (size.w - preset.w * scale * view.scale) / 2, top: marquee.y * scale * view.scale + view.y + (size.h - preset.h * scale * view.scale) / 2, width: marquee.w * scale * view.scale, height: marquee.h * scale * view.scale, border: '1px solid #007AFF', background: 'rgba(0,122,255,0.12)', pointerEvents: 'none', zIndex: 80 }}
+        />
       )}
 
       {view.scale !== 1 && (
