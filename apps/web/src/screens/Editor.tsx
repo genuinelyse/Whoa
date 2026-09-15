@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
+import { ChevronLeft } from 'lucide-react'
 import type { Project } from '#/types'
 import { EditorProvider, useEditor } from '#/store/editor'
-import TopBar from '#/components/editor/TopBar'
 import Canvas from '#/components/editor/Canvas'
 import Toolbar from '#/components/editor/Toolbar'
 import Timeline from '#/components/editor/Timeline'
 import ToolSheet from '#/components/editor/Panels'
-import ExportSheet from '#/components/editor/ExportSheet'
 
 export default function Editor({ project, onExit }: { project: Project; onExit: () => void }) {
   return (
@@ -17,8 +16,7 @@ export default function Editor({ project, onExit }: { project: Project; onExit: 
 }
 
 function EditorInner({ onExit }: { onExit: () => void }) {
-  const { playing, time, setTime, setPlaying, project } = useEditor()
-  const [exporting, setExporting] = useState(false)
+  const { playing, time, setTime, project } = useEditor()
   const raf = useRef(0)
   const last = useRef(0)
   const timeRef = useRef(time)
@@ -42,13 +40,25 @@ function EditorInner({ onExit }: { onExit: () => void }) {
   }, [playing, project.duration])
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-bg select-none">
-      <TopBar onExit={onExit} onExport={() => { setPlaying(false); setExporting(true) }} />
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg select-none">
+      {/* Floating back button in the top left corner */}
+      <button
+        type="button"
+        onClick={onExit}
+        onPointerDown={(e) => e.stopPropagation()}
+        data-testid="editor-back-btn"
+        id="editor-back-btn"
+        aria-label="Back"
+        title="Back"
+        className="absolute top-3 left-3 z-40 grid h-9 w-9 place-items-center rounded-full bg-black/60 text-white backdrop-blur-md border border-white/10 shadow-lg hover:bg-black/80 hover:text-white active:scale-90 transition-all focus:outline-none"
+      >
+        <ChevronLeft className="h-5 w-5" />
+      </button>
+
       <Canvas />
       <Toolbar />
       <Timeline />
       <ToolSheet />
-      {exporting && <ExportSheet onClose={() => setExporting(false)} />}
     </div>
   )
 }
