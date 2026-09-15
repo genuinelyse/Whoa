@@ -369,7 +369,7 @@ interface Ctx extends State {
 const EditorCtx = createContext<Ctx | null>(null)
 
 export function EditorProvider({ project, children }: { project: Project; children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false, artboardSnap: false })
+  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false, artboardSnap: true })
 
   const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])

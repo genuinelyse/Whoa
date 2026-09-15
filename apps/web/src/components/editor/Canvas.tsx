@@ -48,18 +48,18 @@ const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, h
 const tdist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
 const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 })
 
-const SNAP_TOLERANCE = 2
+const SNAP_TOLERANCE_PX = 2
 
 type SnapCandidate = { delta: number; distance: number }
 
-function closestSnapDelta(candidates: SnapCandidate[]) {
+function closestSnapDelta(candidates: SnapCandidate[], tolerance: number) {
   const match = candidates
-    .filter((candidate) => candidate.distance <= SNAP_TOLERANCE)
+    .filter((candidate) => candidate.distance <= tolerance)
     .sort((a, b) => a.distance - b.distance)[0]
   return match?.delta ?? 0
 }
 
-function snapDelta(left: number, top: number, w: number, h: number, artW: number, artH: number) {
+function snapDelta(left: number, top: number, w: number, h: number, artW: number, artH: number, tolerance: number) {
   const right = left + w
   const centerX = left + w / 2
   const bottom = top + h
@@ -83,8 +83,8 @@ function snapDelta(left: number, top: number, w: number, h: number, artW: number
   ]
 
   return {
-    dx: closestSnapDelta(xCandidates),
-    dy: closestSnapDelta(yCandidates),
+    dx: closestSnapDelta(xCandidates, tolerance),
+    dy: closestSnapDelta(yCandidates, tolerance),
   }
 }
 
@@ -258,7 +258,9 @@ export default function Canvas() {
             : { left: rawX, top: rawY, right: rawX + g.ow, bottom: rawY + g.oh }
           const targetW = bounds.right - bounds.left
           const targetH = bounds.bottom - bounds.top
-          const snap = artboardSnapRef.current ? snapDelta(bounds.left, bounds.top, targetW, targetH, preset.w, preset.h) : { dx: 0, dy: 0 }
+          const snap = artboardSnapRef.current
+            ? snapDelta(bounds.left, bounds.top, targetW, targetH, preset.w, preset.h, SNAP_TOLERANCE_PX / eff)
+            : { dx: 0, dy: 0 }
           if (g.group) {
             for (const item of g.group) {
               updateLayer(item.id, { x: Math.round(item.x + dx + snap.dx), y: Math.round(item.y + dy + snap.dy), w: item.w, h: item.h })
