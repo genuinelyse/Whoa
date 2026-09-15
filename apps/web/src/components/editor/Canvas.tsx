@@ -48,12 +48,44 @@ const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, h
 const tdist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
 const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 })
 
-function snapDelta(x: number, y: number, w: number, h: number, artW: number, artH: number) {
-  const xTargets = [0, (artW - w) / 2, artW - w]
-  const yTargets = [0, (artH - h) / 2, artH - h]
-  const targetX = xTargets.reduce((best, target) => Math.abs(target - x) < Math.abs(best - x) ? target : best)
-  const targetY = yTargets.reduce((best, target) => Math.abs(target - y) < Math.abs(best - y) ? target : best)
-  return { dx: targetX - x, dy: targetY - y }
+const SNAP_TOLERANCE = 2
+
+type SnapCandidate = { delta: number; distance: number }
+
+function closestSnapDelta(candidates: SnapCandidate[]) {
+  const match = candidates
+    .filter((candidate) => candidate.distance <= SNAP_TOLERANCE)
+    .sort((a, b) => a.distance - b.distance)[0]
+  return match?.delta ?? 0
+}
+
+function snapDelta(left: number, top: number, w: number, h: number, artW: number, artH: number) {
+  const right = left + w
+  const centerX = left + w / 2
+  const bottom = top + h
+  const centerY = top + h / 2
+  const artCenterX = artW / 2
+  const artCenterY = artH / 2
+
+  const xCandidates = [
+    { delta: -left, distance: Math.abs(left) },
+    { delta: artCenterX - left, distance: Math.abs(left - artCenterX) },
+    { delta: artW - right, distance: Math.abs(right - artW) },
+    { delta: artCenterX - right, distance: Math.abs(right - artCenterX) },
+    { delta: artCenterX - centerX, distance: Math.abs(centerX - artCenterX) },
+  ]
+  const yCandidates = [
+    { delta: artH - bottom, distance: Math.abs(bottom - artH) },
+    { delta: artCenterY - bottom, distance: Math.abs(bottom - artCenterY) },
+    { delta: -top, distance: Math.abs(top) },
+    { delta: artCenterY - top, distance: Math.abs(top - artCenterY) },
+    { delta: artCenterY - centerY, distance: Math.abs(centerY - artCenterY) },
+  ]
+
+  return {
+    dx: closestSnapDelta(xCandidates),
+    dy: closestSnapDelta(yCandidates),
+  }
 }
 
 type ResizeHandle = 'tl' | 'tr' | 'bl' | 'br' | 't' | 'r' | 'b' | 'l'
