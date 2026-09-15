@@ -1,13 +1,13 @@
 {
   "name": "opencut",
   "private": true,
-  "packageManager": "pnpm@9.15.4",
   "workspaces": [
     "apps/*"
   ],
   "scripts": {
-    "dev": "pnpm --dir apps/web dev",
-    "build": "pnpm --dir apps/web build",
-    "preview": "pnpm --dir apps/web preview"
+    "dev": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspace=apps/web && cp -r apps/web/dist ./dist",
+    "preview": "npm run preview --workspace=apps/web",
+    "lint": "node ./apps/web/node_modules/typescript/bin/tsc --noEmit --project apps/web/tsconfig.json"
   }
 }

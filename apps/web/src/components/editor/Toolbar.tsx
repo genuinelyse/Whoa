@@ -59,11 +59,27 @@ export default function Toolbar() {
     }
   }
 
+  const handleAlign = (mode: 'left' | 'center' | 'right' | 'middle') => {
+    const measured: Record<string, { x: number; y: number; w: number; h: number }> = {}
+    for (const id of selectedIds) {
+      const el = document.querySelector(`[data-testid="layer-${id}"]`) as HTMLElement | null
+      if (el) {
+        measured[id] = {
+          x: el.offsetLeft,
+          y: el.offsetTop,
+          w: el.offsetWidth,
+          h: el.offsetHeight,
+        }
+      }
+    }
+    alignSelected(mode, Object.keys(measured).length > 0 ? measured : undefined)
+  }
+
   const groupItems: Item[] = [
-    { key: 'align-left', label: 'Left', icon: <AlignHorizontalJustifyStart />, onClick: () => alignSelected('left') },
-    { key: 'align-center', label: 'Center', icon: <AlignHorizontalJustifyCenter />, onClick: () => alignSelected('center') },
-    { key: 'align-right', label: 'Right', icon: <AlignHorizontalJustifyEnd />, onClick: () => alignSelected('right') },
-    { key: 'align-middle', label: 'Middle', icon: <AlignVerticalJustifyCenter />, onClick: () => alignSelected('middle') },
+    { key: 'align-left', label: 'Left', icon: <AlignHorizontalJustifyStart />, onClick: () => handleAlign('left') },
+    { key: 'align-center', label: 'Center', icon: <AlignHorizontalJustifyCenter />, onClick: () => handleAlign('center') },
+    { key: 'align-right', label: 'Right', icon: <AlignHorizontalJustifyEnd />, onClick: () => handleAlign('right') },
+    { key: 'align-middle', label: 'Middle', icon: <AlignVerticalJustifyCenter />, onClick: () => handleAlign('middle') },
   ]
   const isGroup = selectedIds.length > 1
 

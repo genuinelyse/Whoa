@@ -1,5 +1,14 @@
 {
   "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/components/ui",
+    "src/routes",
+    "src/router.tsx",
+    "src/routeTree.gen.ts",
+    "src/lib/utils.ts"
+  ],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",

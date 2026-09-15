@@ -93,15 +93,16 @@ export function createLayer(type: LayerType, preset: Preset, extra: Partial<Laye
     anim: 'none',
   }
   if (type === 'text') {
+    const fs = Math.round(preset.w * 0.075)
     Object.assign(base, {
       name: 'Text',
       text: 'Double-tap to edit',
       fontFamily: 'Manrope',
-      fontSize: Math.round(preset.w * 0.075),
+      fontSize: fs,
       fontWeight: 800,
       color: '#FFFFFF',
-      align: 'center',
-      h: Math.round(preset.w * 0.075 * 1.3),
+      align: 'left',
+      h: fs,
       anim: 'rise',
     })
   } else if (type === 'shape') {

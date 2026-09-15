@@ -14,7 +14,7 @@ interface State {
 type Action =
   | { t: 'select'; id: string | null; additive?: boolean; ids?: string[] }
   | { t: 'toggleSelect'; id: string }
-  | { t: 'alignSelected'; mode: 'left' | 'center' | 'right' | 'middle' }
+  | { t: 'alignSelected'; mode: 'left' | 'center' | 'right' | 'middle'; measured?: Record<string, { x: number; y: number; w: number; h: number }> }
   | { t: 'tool'; tool: string | null }
   | { t: 'addLayer'; layer: Layer }
   | { t: 'updateLayer'; id: string; patch: Partial<Layer> }
@@ -50,15 +50,42 @@ function reducer(state: State, a: Action): State {
     case 'alignSelected': {
       const selected = p.layers.filter((layer) => state.selectedIds.includes(layer.id))
       if (selected.length < 2) return state
-      const left = Math.min(...selected.map((layer) => layer.x))
-      const right = Math.max(...selected.map((layer) => layer.x + layer.w))
-      const top = Math.min(...selected.map((layer) => layer.y))
-      const bottom = Math.max(...selected.map((layer) => layer.y + layer.h))
+
+      const getBox = (layer: Layer) => {
+        if (a.measured && a.measured[layer.id]) {
+          return a.measured[layer.id]
+        }
+        const isCenteredTemplateText =
+          layer.type === 'text' && layer.align === 'center' && layer.x === 0 && layer.w === p.preset.w
+        const x = isCenteredTemplateText ? (p.preset.w - layer.w) / 2 : layer.x
+        return { x, y: layer.y, w: layer.w, h: layer.h }
+      }
+
+      const boxes = new Map(selected.map((layer) => [layer.id, getBox(layer)]))
+      const left = Math.min(...selected.map((l) => boxes.get(l.id)!.x))
+      const right = Math.max(...selected.map((l) => boxes.get(l.id)!.x + boxes.get(l.id)!.w))
+      const top = Math.min(...selected.map((l) => boxes.get(l.id)!.y))
+      const bottom = Math.max(...selected.map((l) => boxes.get(l.id)!.y + boxes.get(l.id)!.h))
+
       const layers = p.layers.map((layer) => {
         if (!state.selectedIds.includes(layer.id)) return layer
-        const x = a.mode === 'left' ? left : a.mode === 'right' ? right - layer.w : a.mode === 'center' ? (left + right - layer.w) / 2 : layer.x
-        const y = a.mode === 'middle' ? (top + bottom - layer.h) / 2 : layer.y
-        return { ...layer, x, y }
+        const b = boxes.get(layer.id)!
+        const x =
+          a.mode === 'left'
+            ? left
+            : a.mode === 'right'
+              ? right - b.w
+              : a.mode === 'center'
+                ? (left + right - b.w) / 2
+                : b.x
+        const y = a.mode === 'middle' ? (top + bottom - b.h) / 2 : b.y
+        return {
+          ...layer,
+          x: Math.round(x),
+          y: Math.round(y),
+          w: Math.round(b.w),
+          h: Math.round(b.h),
+        }
       })
       return { ...state, project: touch({ ...p, layers }) }
     }
@@ -114,7 +141,7 @@ interface Ctx extends State {
   selectedIds: string[]
   select: (id: string | null, additive?: boolean, ids?: string[]) => void
   toggleSelect: (id: string) => void
-  alignSelected: (mode: 'left' | 'center' | 'right' | 'middle') => void
+  alignSelected: (mode: 'left' | 'center' | 'right' | 'middle', measured?: Record<string, { x: number; y: number; w: number; h: number }>) => void
   openTool: (tool: string | null) => void
   addLayer: (type: LayerType, extra?: Partial<Layer>) => void
   updateLayer: (id: string, patch: Partial<Layer>) => void
@@ -136,7 +163,7 @@ export function EditorProvider({ project, children }: { project: Project; childr
 
   const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
-  const alignSelected = useCallback((mode: 'left' | 'center' | 'right' | 'middle') => dispatch({ t: 'alignSelected', mode }), [])
+  const alignSelected = useCallback((mode: 'left' | 'center' | 'right' | 'middle', measured?: Record<string, { x: number; y: number; w: number; h: number }>) => dispatch({ t: 'alignSelected', mode, measured }), [])
   const openTool = useCallback((tool: string | null) => dispatch({ t: 'tool', tool }), [])
   const updateLayer = useCallback((id: string, patch: Partial<Layer>) => dispatch({ t: 'updateLayer', id, patch }), [])
   const deleteLayer = useCallback((id: string) => dispatch({ t: 'deleteLayer', id }), [])
