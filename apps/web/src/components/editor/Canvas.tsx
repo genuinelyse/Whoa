@@ -48,6 +48,14 @@ const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, h
 const tdist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
 const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 })
 
+function snapDelta(x: number, y: number, w: number, h: number, artW: number, artH: number) {
+  const xTargets = [0, (artW - w) / 2, artW - w]
+  const yTargets = [0, (artH - h) / 2, artH - h]
+  const targetX = xTargets.reduce((best, target) => Math.abs(target - x) < Math.abs(best - x) ? target : best)
+  const targetY = yTargets.reduce((best, target) => Math.abs(target - y) < Math.abs(best - y) ? target : best)
+  return { dx: targetX - x, dy: targetY - y }
+}
+
 type ResizeHandle = 'tl' | 'tr' | 'bl' | 'br' | 't' | 'r' | 'b' | 'l'
 type Gesture =
   | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean; deselectOnTap?: boolean; tapToggleId?: string; tapAddId?: string; group?: { id: string; x: number; y: number; w: number; h: number }[] }
@@ -111,7 +119,7 @@ type Pinch =
   | null
 
 export default function Canvas() {
-  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing } = useEditor()
+  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing, artboardSnap } = useEditor()
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingComponentId, setEditingComponentId] = useState<string | null>(null)
@@ -148,6 +156,8 @@ export default function Canvas() {
   layersRef.current = project.layers
   const selHRef = useRef(selH)
   selHRef.current = selH
+  const artboardSnapRef = useRef(artboardSnap)
+  artboardSnapRef.current = artboardSnap
   const { preset } = project
   const active = mode === 'animated' && !(!playing && time === 0)
 
@@ -201,10 +211,28 @@ export default function Canvas() {
           g.moved = true
         }
         if (g.moved) {
+          const rawX = g.ox + dx
+          const rawY = g.oy + dy
+          const bounds = g.group
+            ? g.group.reduce(
+                (box, item) => ({
+                  left: Math.min(box.left, item.x + dx),
+                  top: Math.min(box.top, item.y + dy),
+                  right: Math.max(box.right, item.x + dx + item.w),
+                  bottom: Math.max(box.bottom, item.y + dy + item.h),
+                }),
+                { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+              )
+            : { left: rawX, top: rawY, right: rawX + g.ow, bottom: rawY + g.oh }
+          const targetW = bounds.right - bounds.left
+          const targetH = bounds.bottom - bounds.top
+          const snap = artboardSnapRef.current ? snapDelta(bounds.left, bounds.top, targetW, targetH, preset.w, preset.h) : { dx: 0, dy: 0 }
           if (g.group) {
-            for (const item of g.group) updateLayer(item.id, { x: Math.round(item.x + dx), y: Math.round(item.y + dy), w: item.w, h: item.h })
+            for (const item of g.group) {
+              updateLayer(item.id, { x: Math.round(item.x + dx + snap.dx), y: Math.round(item.y + dy + snap.dy), w: item.w, h: item.h })
+            }
           } else {
-            updateLayer(g.id, { x: Math.round(g.ox + dx), y: Math.round(g.oy + dy), w: g.ow, h: g.oh })
+            updateLayer(g.id, { x: Math.round(rawX + snap.dx), y: Math.round(rawY + snap.dy), w: g.ow, h: g.oh })
           }
         }
         return
