@@ -43,7 +43,7 @@ interface TimelineRowItem {
 export default function Timeline() {
   const {
     project, time, setTime, playing, setPlaying, selectedId, select,
-    updateLayer, toggleGroupCollapse, reorder,
+    updateLayer, toggleGroupCollapse, reorder, timelineOpen, toggleTimeline,
   } = useEditor()
   const [ppms, setPpms] = useState(0.05)
   const trackRef = useRef<HTMLDivElement>(null)
@@ -196,7 +196,15 @@ export default function Timeline() {
   }
 
   return (
-    <div className="shrink-0 border-t border-line bg-timeline" data-testid="timeline">
+    <div
+      className={`shrink-0 border-t border-line bg-timeline transition-all duration-200 ${
+        timelineOpen ? 'block' : 'hidden'
+      }`}
+      data-testid="timeline"
+      data-collapsed={!timelineOpen}
+      data-state={timelineOpen ? 'open' : 'collapsed'}
+      aria-hidden={!timelineOpen}
+    >
       {/* controls and ruler */}
       <div className="h-16 bg-timeline">
         <div className="flex h-11 items-center gap-2 px-3">
@@ -231,6 +239,15 @@ export default function Timeline() {
             </button>
             <button data-testid="zoom-in" onClick={() => setPpms((p) => Math.min(0.4, p + 0.03))} className="grid h-8 w-8 place-items-center rounded-lg text-txt2 active:bg-surface2">
               <ZoomIn className="h-4 w-4" />
+            </button>
+            <button
+              data-testid="timeline-collapse-btn"
+              onClick={() => toggleTimeline(false)}
+              className="grid h-8 w-8 place-items-center rounded-lg text-txt2 hover:text-white active:bg-surface2 transition-colors"
+              title="Collapse timeline"
+              aria-label="Collapse timeline"
+            >
+              <ChevronDown className="h-4 w-4" />
             </button>
           </div>
         </div>

@@ -3,7 +3,7 @@ import {
   Copy, Trash2, Wand2, Droplets, AlignLeft, Bold, PaintBucket, Square,
   ArrowUp, ArrowDown, Scissors, Crop, FolderPlus, Ungroup, Component as ComponentIcon,
   AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignVerticalJustifyCenter,
-  Magnet,
+  Magnet, ChevronUp, ChevronDown,
 } from 'lucide-react'
 import { useEditor } from '#/store/editor'
 
@@ -13,6 +13,7 @@ export default function Toolbar() {
   const {
     project, selected, selectedIds, alignSelected, openTool, deleteLayer, duplicate, reorder,
     createGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
+    timelineOpen, toggleTimeline,
   } = useEditor()
 
   let items: Item[] = []
@@ -140,26 +141,44 @@ export default function Toolbar() {
       ]
     : alignOptions
 
-  const renderItem = (it: Item) => (
-    <button
-      key={it.key}
-      data-testid={`tool-${it.key}`}
-      aria-label={it.label}
-      onClick={() => (it.onClick ? it.onClick() : openTool(it.key))}
-      className={`flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-1 rounded-xl transition-colors active:bg-surface2 ${
-        it.danger
-          ? 'text-danger'
-          : it.accent
-            ? 'text-purple-400 font-semibold'
-            : it.active
-              ? 'bg-accent/20 text-accent'
-              : 'text-txt'
-      }`}
-    >
-      <span className="[&>svg]:h-5 [&>svg]:w-5">{it.icon}</span>
-      <span className="text-[10px] font-medium">{it.label}</span>
-    </button>
-  )
+  const renderItem = (it: Item) => {
+    const isTimeline = it.key === 'timeline'
+    const button = (
+      <button
+        key={it.key}
+        data-testid={isTimeline ? 'toggle-timeline' : `tool-${it.key}`}
+        id={isTimeline ? 'toggle-timeline' : `tool-${it.key}`}
+        aria-label={isTimeline ? (timelineOpen ? '^ Collapse timeline' : '^ Expand timeline') : it.label}
+        title={isTimeline ? (timelineOpen ? 'Collapse timeline (^)' : 'Expand timeline (^)') : it.label}
+        onClick={() => (it.onClick ? it.onClick() : openTool(it.key))}
+        className={`flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-1 rounded-xl transition-colors active:bg-surface2 ${
+          it.danger
+            ? 'text-danger'
+            : it.accent
+              ? 'text-purple-400 font-semibold'
+              : it.active
+                ? 'bg-accent/20 text-accent font-semibold'
+                : 'text-txt'
+        }`}
+      >
+        <span className="[&>svg]:h-5 [&>svg]:w-5 flex items-center justify-center">{it.icon}</span>
+        <span className="text-[10px] font-medium flex items-center justify-center gap-0.5">
+          {isTimeline && <span className="text-[9px] font-bold">^</span>}
+          <span>{it.label}</span>
+        </span>
+      </button>
+    )
+
+    if (isTimeline) {
+      return (
+        <div key={it.key} data-testid="tool-timeline" className="shrink-0 flex items-center justify-center">
+          {button}
+        </div>
+      )
+    }
+
+    return button
+  }
 
   const snapItem: Item = {
     key: 'artboard-snap',
@@ -169,9 +188,18 @@ export default function Toolbar() {
     onClick: () => setArtboardSnap(!artboardSnap),
   }
 
+  const timelineItem: Item = {
+    key: 'timeline',
+    label: 'Timeline',
+    icon: timelineOpen ? <ChevronDown className="h-5 w-5" /> : <ChevronUp className="h-5 w-5" />,
+    active: timelineOpen,
+    onClick: () => toggleTimeline(),
+  }
+
   return (
     <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">
       {renderItem(snapItem)}
+      {renderItem(timelineItem)}
       <div className={`flex shrink-0 items-center gap-1 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[400px] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
         {groupItems.map(renderItem)}
       </div>

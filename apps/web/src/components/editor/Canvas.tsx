@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from 'lucide-react'
 import type { Layer, LayerType } from '#/types'
 import { useEditor } from '#/store/editor'
 import { getDescendantLayers, getTopmostGroup } from '#/lib/groups'
+import { findSizeMatch, getCandidateTargets, type SizeMatch } from '#/lib/sizeMatch'
+import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null)
@@ -49,6 +52,8 @@ const tdist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.client
 const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 })
 
 const SNAP_TOLERANCE_PX = 8
+const SIZE_SNAP_TOLERANCE_PX = 8
+const GAP_SNAP_TOLERANCE_PX = 8
 
 type SnapCandidate = { delta: number; distance: number; guide: number }
 
@@ -160,13 +165,15 @@ type Pinch =
   | null
 
 export default function Canvas() {
-  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing, artboardSnap } = useEditor()
+  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing, artboardSnap, nudge } = useEditor()
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingComponentId, setEditingComponentId] = useState<string | null>(null)
   const [multiSelectMode, setMultiSelectMode] = useState(false)
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const [snapGuides, setSnapGuides] = useState<{ active: boolean; xGuides: number[]; yGuides: number[] } | null>(null)
+  const [sizeMatch, setSizeMatch] = useState<SizeMatch | null>(null)
+  const [gapMatch, setGapMatch] = useState<GapMatchResult | null>(null)
   const marqueeSession = useRef<{ active: boolean; start: { x: number; y: number }; update?: (event: PointerEvent) => void; finish?: (event: PointerEvent) => void }>({ active: false, start: { x: 0, y: 0 } })
   const marqueeLongPress = useRef<number | null>(null)
   const [pinchActive, setPinchActive] = useState(false)
@@ -200,6 +207,25 @@ export default function Canvas() {
   selHRef.current = selH
   const artboardSnapRef = useRef(artboardSnap)
   artboardSnapRef.current = artboardSnap
+
+  const getExcludeIds = useCallback((gId?: string, group?: { id: string }[]) => {
+    const exclude = new Set<string>()
+    if (group) {
+      for (const item of group) {
+        exclude.add(item.id)
+        for (const d of getDescendantLayers(item.id, layersRef.current)) exclude.add(d.id)
+      }
+    }
+    if (gId) {
+      exclude.add(gId)
+      for (const d of getDescendantLayers(gId, layersRef.current)) exclude.add(d.id)
+    }
+    for (const id of selectedIdsRef.current) {
+      exclude.add(id)
+      for (const d of getDescendantLayers(id, layersRef.current)) exclude.add(d.id)
+    }
+    return exclude
+  }, [])
   const { preset } = project
   const active = mode === 'animated' && !(!playing && time === 0)
 
@@ -271,17 +297,51 @@ export default function Canvas() {
           const snap = artboardSnapRef.current
             ? snapDelta(bounds.left, bounds.top, targetW, targetH, preset.w, preset.h, SNAP_TOLERANCE_PX / eff)
             : { dx: 0, dy: 0, xGuides: [], yGuides: [] }
+
+          let finalDx = snap.dx
+          let finalDy = snap.dy
+          let activeXGuides = snap.xGuides
+          let activeYGuides = snap.yGuides
+
           if (artboardSnapRef.current) {
-            setSnapGuides({ active: true, xGuides: snap.xGuides, yGuides: snap.yGuides })
+            const excludeIds = getExcludeIds(g.id, g.group)
+            const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
+            if (candidates.length >= 2) {
+              const gapRes = findGapMatch(
+                { x: bounds.left, y: bounds.top, w: targetW, h: targetH },
+                candidates,
+                GAP_SNAP_TOLERANCE_PX,
+              )
+              const hasGapY = gapRes.gaps.some((item) => item.axis === 'y')
+              const hasGapX = gapRes.gaps.some((item) => item.axis === 'x')
+              if (hasGapY) {
+                finalDy = gapRes.dy
+                activeYGuides = []
+              }
+              if (hasGapX) {
+                finalDx = gapRes.dx
+                activeXGuides = []
+              }
+              if (gapRes.gaps.length > 0) {
+                setGapMatch(gapRes)
+              } else {
+                setGapMatch(null)
+              }
+            } else {
+              setGapMatch(null)
+            }
+            setSnapGuides({ active: true, xGuides: activeXGuides, yGuides: activeYGuides })
           } else {
             setSnapGuides(null)
+            setGapMatch(null)
           }
+
           if (g.group) {
             for (const item of g.group) {
-              updateLayer(item.id, { x: Math.round(item.x + dx + snap.dx), y: Math.round(item.y + dy + snap.dy), w: item.w, h: item.h })
+              updateLayer(item.id, { x: Math.round(item.x + dx + finalDx), y: Math.round(item.y + dy + finalDy), w: item.w, h: item.h })
             }
           } else {
-            updateLayer(g.id, { x: Math.round(rawX + snap.dx), y: Math.round(rawY + snap.dy), w: g.ow, h: g.oh })
+            updateLayer(g.id, { x: Math.round(rawX + finalDx), y: Math.round(rawY + finalDy), w: g.ow, h: g.oh })
           }
         }
         return
@@ -313,19 +373,56 @@ export default function Canvas() {
         newH = Math.max(15, g.oh + dy)
       }
 
+      const tol = SIZE_SNAP_TOLERANCE_PX
+
       if (g.group) {
+        const excludeIds = getExcludeIds(g.id, g.group)
+        const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
+
         if (isCorner) {
-          const factor = Math.min(newW / g.ow, newH / g.oh)
-          const w = Math.max(20, g.ow * factor)
-          const h = Math.max(20, g.oh * factor)
+          let factor = Math.min(newW / g.ow, newH / g.oh)
+          let w = Math.max(20, g.ow * factor)
+          let h = Math.max(20, g.oh * factor)
           const groupX = isLeft ? g.ox + (g.ow - w) : g.ox
           const groupY = isTop ? g.oy + (g.oh - h) : g.oy
+
+          if (artboardSnapRef.current && candidates.length > 0) {
+            const sm = findSizeMatch(w, h, { x: groupX, y: groupY, w, h }, candidates, tol, true, true)
+            if (sm.widthMatch) {
+              factor = sm.snappedW / g.ow
+              w = sm.snappedW
+              h = Math.max(20, Math.round(g.oh * factor))
+              const finalX = isLeft ? g.ox + (g.ow - w) : g.ox
+              const finalY = isTop ? g.oy + (g.oh - h) : g.oy
+              setSizeMatch({
+                active: true,
+                widthMatch: { ...sm.widthMatch, resizingBox: { x: finalX, y: finalY, w, h } },
+              })
+            } else if (sm.heightMatch) {
+              factor = sm.snappedH / g.oh
+              h = sm.snappedH
+              w = Math.max(20, Math.round(g.ow * factor))
+              const finalX = isLeft ? g.ox + (g.ow - w) : g.ox
+              const finalY = isTop ? g.oy + (g.oh - h) : g.oy
+              setSizeMatch({
+                active: true,
+                heightMatch: { ...sm.heightMatch, resizingBox: { x: finalX, y: finalY, w, h } },
+              })
+            } else {
+              setSizeMatch(null)
+            }
+          } else {
+            setSizeMatch(null)
+          }
+
+          const finalX = isLeft ? g.ox + (g.ow - w) : g.ox
+          const finalY = isTop ? g.oy + (g.oh - h) : g.oy
           const sx = w / g.ow
           const sy = h / g.oh
           for (const item of g.group) {
             const patch: Partial<Layer> = {
-              x: Math.round(groupX + (item.x - g.ox) * sx),
-              y: Math.round(groupY + (item.y - g.oy) * sy),
+              x: Math.round(finalX + (item.x - g.ox) * sx),
+              y: Math.round(finalY + (item.y - g.oy) * sy),
               w: Math.max(10, Math.round(item.w * sx)),
               h: Math.max(10, Math.round(item.h * sy)),
             }
@@ -337,7 +434,7 @@ export default function Canvas() {
             }
           }
           if (g.id && !g.group.some((i) => i.id === g.id)) {
-            updateLayer(g.id, { x: Math.round(groupX), y: Math.round(groupY), w: Math.round(w), h: Math.round(h) })
+            updateLayer(g.id, { x: Math.round(finalX), y: Math.round(finalY), w: Math.round(w), h: Math.round(h) })
           }
         } else {
           // Middle handles: increase padding on that side instead of resizing elements uniformly
@@ -346,7 +443,18 @@ export default function Canvas() {
 
           if (handle === 'r') {
             const minW = g.maxFgRight ? Math.max(20, g.maxFgRight - g.ox) : 20
-            const clampedW = Math.max(minW, Math.round(g.ow + dx))
+            let clampedW = Math.max(minW, Math.round(g.ow + dx))
+            if (artboardSnapRef.current && candidates.length > 0) {
+              const sm = findSizeMatch(clampedW, g.oh, { x: g.ox, y: g.oy, w: clampedW, h: g.oh }, candidates, tol, true, false)
+              if (sm.widthMatch) {
+                clampedW = Math.max(minW, sm.snappedW)
+                setSizeMatch({ active: true, widthMatch: sm.widthMatch })
+              } else {
+                setSizeMatch(null)
+              }
+            } else {
+              setSizeMatch(null)
+            }
             const padDelta = clampedW - g.ow
 
             if (hasBg) {
@@ -366,8 +474,21 @@ export default function Canvas() {
           } else if (handle === 'l') {
             const rawW = Math.max(20, g.ow - dx)
             const maxLeft = g.minFgLeft != null ? g.minFgLeft : g.ox + g.ow - 20
-            const clampedX = Math.min(maxLeft, g.ox + (g.ow - rawW))
-            const clampedW = g.ow + (g.ox - clampedX)
+            let clampedX = Math.min(maxLeft, g.ox + (g.ow - rawW))
+            let clampedW = g.ow + (g.ox - clampedX)
+            if (artboardSnapRef.current && candidates.length > 0) {
+              const sm = findSizeMatch(clampedW, g.oh, { x: clampedX, y: g.oy, w: clampedW, h: g.oh }, candidates, tol, true, false)
+              if (sm.widthMatch) {
+                clampedW = sm.snappedW
+                clampedX = Math.min(maxLeft, g.ox + (g.ow - clampedW))
+                clampedW = g.ow + (g.ox - clampedX)
+                setSizeMatch({ active: true, widthMatch: sm.widthMatch })
+              } else {
+                setSizeMatch(null)
+              }
+            } else {
+              setSizeMatch(null)
+            }
             const padDelta = clampedW - g.ow
 
             if (hasBg) {
@@ -390,7 +511,18 @@ export default function Canvas() {
             }
           } else if (handle === 'b') {
             const minH = g.maxFgBottom ? Math.max(20, g.maxFgBottom - g.oy) : 20
-            const clampedH = Math.max(minH, Math.round(g.oh + dy))
+            let clampedH = Math.max(minH, Math.round(g.oh + dy))
+            if (artboardSnapRef.current && candidates.length > 0) {
+              const sm = findSizeMatch(g.ow, clampedH, { x: g.ox, y: g.oy, w: g.ow, h: clampedH }, candidates, tol, false, true)
+              if (sm.heightMatch) {
+                clampedH = Math.max(minH, sm.snappedH)
+                setSizeMatch({ active: true, heightMatch: sm.heightMatch })
+              } else {
+                setSizeMatch(null)
+              }
+            } else {
+              setSizeMatch(null)
+            }
             const padDelta = clampedH - g.oh
 
             if (hasBg) {
@@ -410,8 +542,21 @@ export default function Canvas() {
           } else if (handle === 't') {
             const rawH = Math.max(20, g.oh - dy)
             const maxTop = g.minFgTop != null ? g.minFgTop : g.oy + g.oh - 20
-            const clampedY = Math.min(maxTop, g.oy + (g.oh - rawH))
-            const clampedH = g.oh + (g.oy - clampedY)
+            let clampedY = Math.min(maxTop, g.oy + (g.oh - rawH))
+            let clampedH = g.oh + (g.oy - clampedY)
+            if (artboardSnapRef.current && candidates.length > 0) {
+              const sm = findSizeMatch(g.ow, clampedH, { x: g.ox, y: clampedY, w: g.ow, h: clampedH }, candidates, tol, false, true)
+              if (sm.heightMatch) {
+                clampedH = sm.snappedH
+                clampedY = Math.min(maxTop, g.oy + (g.oh - clampedH))
+                clampedH = g.oh + (g.oy - clampedY)
+                setSizeMatch({ active: true, heightMatch: sm.heightMatch })
+              } else {
+                setSizeMatch(null)
+              }
+            } else {
+              setSizeMatch(null)
+            }
             const padDelta = clampedH - g.oh
 
             if (hasBg) {
@@ -449,9 +594,38 @@ export default function Canvas() {
           if (g.origPadLeft) patch.paddingLeft = Math.round(g.origPadLeft * factor)
           updateLayer(g.id, patch)
         } else {
-          const factor = Math.min(newW / g.ow, newH / g.oh)
-          const w = Math.max(15, Math.round(g.ow * factor))
-          const h = Math.max(15, Math.round(g.oh * factor))
+          let factor = Math.min(newW / g.ow, newH / g.oh)
+          let w = Math.max(15, Math.round(g.ow * factor))
+          let h = Math.max(15, Math.round(g.oh * factor))
+
+          const excludeIds = getExcludeIds(g.id)
+          const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
+          const candX = isLeft ? Math.round(g.ox + (g.ow - w)) : g.ox
+          const candY = isTop ? Math.round(g.oy + (g.oh - h)) : g.oy
+
+          if (artboardSnapRef.current && candidates.length > 0) {
+            const sm = findSizeMatch(w, h, { x: candX, y: candY, w, h }, candidates, tol, true, true)
+            if (sm.widthMatch) {
+              const snapFactor = sm.snappedW / g.ow
+              w = sm.snappedW
+              h = Math.max(15, Math.round(g.oh * snapFactor))
+              const finalX = isLeft ? Math.round(g.ox + (g.ow - w)) : g.ox
+              const finalY = isTop ? Math.round(g.oy + (g.oh - h)) : g.oy
+              setSizeMatch({ active: true, widthMatch: { ...sm.widthMatch, resizingBox: { x: finalX, y: finalY, w, h } } })
+            } else if (sm.heightMatch) {
+              const snapFactor = sm.snappedH / g.oh
+              h = sm.snappedH
+              w = Math.max(15, Math.round(g.ow * snapFactor))
+              const finalX = isLeft ? Math.round(g.ox + (g.ow - w)) : g.ox
+              const finalY = isTop ? Math.round(g.oy + (g.oh - h)) : g.oy
+              setSizeMatch({ active: true, heightMatch: { ...sm.heightMatch, resizingBox: { x: finalX, y: finalY, w, h } } })
+            } else {
+              setSizeMatch(null)
+            }
+          } else {
+            setSizeMatch(null)
+          }
+
           const x = isLeft ? Math.round(g.ox + (g.ow - w)) : g.ox
           const y = isTop ? Math.round(g.oy + (g.oh - h)) : g.oy
           updateLayer(g.id, { x, y, w, h })
@@ -475,18 +649,73 @@ export default function Canvas() {
             updateLayer(g.id, { y: Math.round(g.oy - deltaPad), h: Math.round(g.oh), paddingTop: newPadTop })
           }
         } else if (g.layerType === 'shape') {
+          const excludeIds = getExcludeIds(g.id)
+          const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
+
           if (handle === 'r') {
-            updateLayer(g.id, { w: Math.max(15, Math.round(g.ow + dx)) })
+            const rawW = Math.max(15, Math.round(g.ow + dx))
+            let finalW = rawW
+            if (artboardSnapRef.current && candidates.length > 0) {
+              const sm = findSizeMatch(rawW, g.oh, { x: g.ox, y: g.oy, w: rawW, h: g.oh }, candidates, tol, true, false)
+              if (sm.widthMatch) {
+                finalW = sm.snappedW
+                setSizeMatch({ active: true, widthMatch: sm.widthMatch })
+              } else {
+                setSizeMatch(null)
+              }
+            } else {
+              setSizeMatch(null)
+            }
+            updateLayer(g.id, { w: finalW })
           } else if (handle === 'l') {
-            const w = Math.max(15, Math.round(g.ow - dx))
-            const x = g.ox + (g.ow - w)
-            updateLayer(g.id, { x: Math.round(x), w })
+            const rawW = Math.max(15, Math.round(g.ow - dx))
+            let finalW = rawW
+            const candX = g.ox + (g.ow - rawW)
+            if (artboardSnapRef.current && candidates.length > 0) {
+              const sm = findSizeMatch(rawW, g.oh, { x: candX, y: g.oy, w: rawW, h: g.oh }, candidates, tol, true, false)
+              if (sm.widthMatch) {
+                finalW = sm.snappedW
+                setSizeMatch({ active: true, widthMatch: sm.widthMatch })
+              } else {
+                setSizeMatch(null)
+              }
+            } else {
+              setSizeMatch(null)
+            }
+            const x = g.ox + (g.ow - finalW)
+            updateLayer(g.id, { x: Math.round(x), w: finalW })
           } else if (handle === 'b') {
-            updateLayer(g.id, { h: Math.max(15, Math.round(g.oh + dy)) })
+            const rawH = Math.max(15, Math.round(g.oh + dy))
+            let finalH = rawH
+            if (artboardSnapRef.current && candidates.length > 0) {
+              const sm = findSizeMatch(g.ow, rawH, { x: g.ox, y: g.oy, w: g.ow, h: rawH }, candidates, tol, false, true)
+              if (sm.heightMatch) {
+                finalH = sm.snappedH
+                setSizeMatch({ active: true, heightMatch: sm.heightMatch })
+              } else {
+                setSizeMatch(null)
+              }
+            } else {
+              setSizeMatch(null)
+            }
+            updateLayer(g.id, { h: finalH })
           } else if (handle === 't') {
-            const h = Math.max(15, Math.round(g.oh - dy))
-            const y = g.oy + (g.oh - h)
-            updateLayer(g.id, { y: Math.round(y), h })
+            const rawH = Math.max(15, Math.round(g.oh - dy))
+            let finalH = rawH
+            const candY = g.oy + (g.oh - rawH)
+            if (artboardSnapRef.current && candidates.length > 0) {
+              const sm = findSizeMatch(g.ow, rawH, { x: g.ox, y: candY, w: g.ow, h: rawH }, candidates, tol, false, true)
+              if (sm.heightMatch) {
+                finalH = sm.snappedH
+                setSizeMatch({ active: true, heightMatch: sm.heightMatch })
+              } else {
+                setSizeMatch(null)
+              }
+            } else {
+              setSizeMatch(null)
+            }
+            const y = g.oy + (g.oh - finalH)
+            updateLayer(g.id, { y: Math.round(y), h: finalH })
           }
         }
       }
@@ -522,6 +751,8 @@ export default function Canvas() {
     gesture.current = null
     panGesture.current = null
     setSnapGuides(null)
+    setSizeMatch(null)
+    setGapMatch(null)
   }
   window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -533,11 +764,43 @@ export default function Canvas() {
     }
   }, [scale, toggleSelect, updateLayer])
 
-  // Track spacebar for pan navigation
+  const handleNudge = useCallback(
+    (dx: number, dy: number) => {
+      const measured: Record<string, { x: number; y: number; w: number; h: number }> = {}
+      for (const [id, node] of layerRefs.current.entries()) {
+        if (node) {
+          const l = layersRef.current.find((layer) => layer.id === id)
+          const isCentered = l?.type === 'text' && l.align === 'center' && l.x === 0 && l.w === preset.w
+          const w = node.offsetWidth
+          const h = node.offsetHeight
+          const x = isCentered ? (preset.w - w) / 2 : node.offsetLeft
+          const y = node.offsetTop
+          measured[id] = { x, y, w, h }
+        }
+      }
+      nudge(dx, dy, measured)
+    },
+    [nudge, preset.w],
+  )
+
+  // Track spacebar for pan navigation & arrow keys for nudging
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName) && !editingId) {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName) || editingId) return
+      if (e.code === 'Space') {
         isSpacePressed.current = true
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        handleNudge(-1, 0)
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        handleNudge(1, 0)
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        handleNudge(0, -1)
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        handleNudge(0, 1)
       }
     }
     const up = (e: KeyboardEvent) => {
@@ -551,7 +814,7 @@ export default function Canvas() {
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
     }
-  }, [editingId])
+  }, [editingId, handleNudge])
 
   const getPinchTargetAndItems = (effId: string | null) => {
     const targetId = effId || selectedRef.current || selectedIdsRef.current[0] || null
@@ -617,21 +880,60 @@ export default function Canvas() {
 
   const applyPinchScaling = (p: NonNullable<typeof pinch.current>, ratio: number) => {
     if (p.mode !== 'resize') return
+    const tol = SIZE_SNAP_TOLERANCE_PX
+
     if (p.group && p.group.length > 0) {
       const minX = Math.min(...p.group.map((item) => item.x))
       const maxX = Math.max(...p.group.map((item) => item.x + item.w))
       const minY = Math.min(...p.group.map((item) => item.y))
       const maxY = Math.max(...p.group.map((item) => item.y + item.h))
+      const groupW = maxX - minX
+      const groupH = maxY - minY
+      let ratioToApply = ratio
+
+      const excludeIds = new Set<string>(p.group.map((i) => i.id))
+      if (p.id) excludeIds.add(p.id)
+      for (const id of Array.from(excludeIds)) {
+        for (const d of getDescendantLayers(id, layersRef.current)) excludeIds.add(d.id)
+      }
+      for (const id of selectedIdsRef.current) {
+        excludeIds.add(id)
+        for (const d of getDescendantLayers(id, layersRef.current)) excludeIds.add(d.id)
+      }
+
+      const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
+
+      if (artboardSnapRef.current && candidates.length > 0) {
+        const rawW = groupW * ratio
+        const rawH = groupH * ratio
+        const sm = findSizeMatch(rawW, rawH, { x: minX, y: minY, w: rawW, h: rawH }, candidates, tol, true, true)
+        if (sm.widthMatch) {
+          ratioToApply = sm.snappedW / groupW
+          const finalW = sm.snappedW
+          const finalH = groupH * ratioToApply
+          setSizeMatch({ active: true, widthMatch: { ...sm.widthMatch, resizingBox: { x: minX, y: minY, w: finalW, h: finalH } } })
+        } else if (sm.heightMatch) {
+          ratioToApply = sm.snappedH / groupH
+          const finalH = sm.snappedH
+          const finalW = groupW * ratioToApply
+          setSizeMatch({ active: true, heightMatch: { ...sm.heightMatch, resizingBox: { x: minX, y: minY, w: finalW, h: finalH } } })
+        } else {
+          setSizeMatch(null)
+        }
+      } else {
+        setSizeMatch(null)
+      }
+
       const cx = (minX + maxX) / 2
       const cy = (minY + maxY) / 2
       for (const item of p.group) {
-        const w = Math.max(10, Math.round(item.w * ratio))
-        const h = Math.max(10, Math.round(item.h * ratio))
-        const x = Math.round(cx + (item.x - cx) * ratio)
-        const y = Math.round(cy + (item.y - cy) * ratio)
+        const w = Math.max(10, Math.round(item.w * ratioToApply))
+        const h = Math.max(10, Math.round(item.h * ratioToApply))
+        const x = Math.round(cx + (item.x - cx) * ratioToApply)
+        const y = Math.round(cy + (item.y - cy) * ratioToApply)
         const layer = layersRef.current.find((candidate) => candidate.id === item.id)
         if (layer?.type === 'text' && item.fontSize) {
-          updateLayer(item.id, { x, y, w, h, fontSize: Math.max(6, Math.round(item.fontSize * ratio)) })
+          updateLayer(item.id, { x, y, w, h, fontSize: Math.max(6, Math.round(item.fontSize * ratioToApply)) })
         } else {
           updateLayer(item.id, { x, y, w, h })
         }
@@ -639,11 +941,46 @@ export default function Canvas() {
     } else {
       const selected = layersRef.current.find((l) => l.id === p.id)
       if (!selected) return
-      const w = Math.max(20, Math.round(p.w0 * ratio))
-      const h = Math.max(20, Math.round(p.h0 * ratio))
+      let ratioToApply = ratio
+      const rawW = Math.max(20, Math.round(p.w0 * ratio))
+      const rawH = Math.max(20, Math.round(p.h0 * ratio))
+
+      const excludeIds = new Set<string>([p.id])
+      for (const d of getDescendantLayers(p.id, layersRef.current)) excludeIds.add(d.id)
+      for (const id of selectedIdsRef.current) {
+        excludeIds.add(id)
+        for (const d of getDescendantLayers(id, layersRef.current)) excludeIds.add(d.id)
+      }
+      const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
+
+      if (artboardSnapRef.current && candidates.length > 0) {
+        const sm = findSizeMatch(rawW, rawH, { x: p.x0, y: p.y0, w: rawW, h: rawH }, candidates, tol, true, true)
+        if (sm.widthMatch) {
+          ratioToApply = sm.snappedW / p.w0
+          const finalW = sm.snappedW
+          const finalH = Math.max(20, Math.round(p.h0 * ratioToApply))
+          const finalX = Math.round(p.x0 + (p.w0 - finalW) / 2)
+          const finalY = Math.round(p.y0 + (p.h0 - finalH) / 2)
+          setSizeMatch({ active: true, widthMatch: { ...sm.widthMatch, resizingBox: { x: finalX, y: finalY, w: finalW, h: finalH } } })
+        } else if (sm.heightMatch) {
+          ratioToApply = sm.snappedH / p.h0
+          const finalH = sm.snappedH
+          const finalW = Math.max(20, Math.round(p.w0 * ratioToApply))
+          const finalX = Math.round(p.x0 + (p.w0 - finalW) / 2)
+          const finalY = Math.round(p.y0 + (p.h0 - finalH) / 2)
+          setSizeMatch({ active: true, heightMatch: { ...sm.heightMatch, resizingBox: { x: finalX, y: finalY, w: finalW, h: finalH } } })
+        } else {
+          setSizeMatch(null)
+        }
+      } else {
+        setSizeMatch(null)
+      }
+
+      const w = Math.max(20, Math.round(p.w0 * ratioToApply))
+      const h = Math.max(20, Math.round(p.h0 * ratioToApply))
       const x = Math.round(p.x0 + (p.w0 - w) / 2)
       const y = Math.round(p.y0 + (p.h0 - h) / 2)
-      if (selected.type === 'text') updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratio)) })
+      if (selected.type === 'text') updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratioToApply)) })
       else updateLayer(p.id, { x, y, w, h })
     }
   }
@@ -1138,6 +1475,7 @@ export default function Canvas() {
             pinch.current = null
             pinching.current = false
             setPinchActive(false)
+            setSizeMatch(null)
           }
           if (activeTouches.current.size === 0) pinchTouchSequence.current = false
         }
@@ -1149,6 +1487,7 @@ export default function Canvas() {
             pinch.current = null
             pinching.current = false
             setPinchActive(false)
+            setSizeMatch(null)
           }
           if (activeTouches.current.size === 0) pinchTouchSequence.current = false
         }
@@ -1729,6 +2068,310 @@ export default function Canvas() {
               </div>
             )
           })()}
+
+          {/* SIZE MATCH GUIDES & INDICATOR */}
+          {sizeMatch && (sizeMatch.widthMatch || sizeMatch.heightMatch) && (
+            <>
+              {/* Width match indicator lines & dimension labels */}
+              {sizeMatch.widthMatch && (
+                <div
+                  data-testid="size-match-guide-width"
+                  data-dimension-width={sizeMatch.widthMatch.size}
+                  data-matched-target-id={sizeMatch.widthMatch.targetBox.id}
+                  className="pointer-events-none"
+                >
+                  {/* Dimension line on resizing element */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: sizeMatch.widthMatch.resizingBox.x,
+                      top: sizeMatch.widthMatch.resizingBox.y + sizeMatch.widthMatch.resizingBox.h + 8 / (scale * view.scale),
+                      width: sizeMatch.widthMatch.resizingBox.w,
+                      height: 1.5 / (scale * view.scale),
+                      background: '#ec4899',
+                      zIndex: 75,
+                    }}
+                  >
+                    <div style={{ position: 'absolute', left: 0, top: -3.5 / (scale * view.scale), width: 1.5 / (scale * view.scale), height: 8.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <div style={{ position: 'absolute', right: 0, top: -3.5 / (scale * view.scale), width: 1.5 / (scale * view.scale), height: 8.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: '50%',
+                        top: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        background: '#ec4899',
+                        color: '#fff',
+                        fontSize: Math.max(9, 10 / (scale * view.scale)),
+                        lineHeight: 1,
+                        padding: `${2 / (scale * view.scale)}px ${5 / (scale * view.scale)}px`,
+                        borderRadius: 3 / (scale * view.scale),
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                      }}
+                    >
+                      {Math.round(sizeMatch.widthMatch.size)} px
+                    </div>
+                  </div>
+
+                  {/* Dimension line on matched target element */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: sizeMatch.widthMatch.targetBox.x,
+                      top: sizeMatch.widthMatch.targetBox.y + sizeMatch.widthMatch.targetBox.h + 8 / (scale * view.scale),
+                      width: sizeMatch.widthMatch.targetBox.w,
+                      height: 1.5 / (scale * view.scale),
+                      background: '#ec4899',
+                      zIndex: 75,
+                    }}
+                  >
+                    <div style={{ position: 'absolute', left: 0, top: -3.5 / (scale * view.scale), width: 1.5 / (scale * view.scale), height: 8.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <div style={{ position: 'absolute', right: 0, top: -3.5 / (scale * view.scale), width: 1.5 / (scale * view.scale), height: 8.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: '50%',
+                        top: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        background: '#ec4899',
+                        color: '#fff',
+                        fontSize: Math.max(9, 10 / (scale * view.scale)),
+                        lineHeight: 1,
+                        padding: `${2 / (scale * view.scale)}px ${5 / (scale * view.scale)}px`,
+                        borderRadius: 3 / (scale * view.scale),
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                      }}
+                    >
+                      {Math.round(sizeMatch.widthMatch.size)} px
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Height match indicator lines & dimension labels */}
+              {sizeMatch.heightMatch && (
+                <div
+                  data-testid="size-match-guide-height"
+                  data-dimension-height={sizeMatch.heightMatch.size}
+                  data-matched-target-id={sizeMatch.heightMatch.targetBox.id}
+                  className="pointer-events-none"
+                >
+                  {/* Dimension line on resizing element */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: sizeMatch.heightMatch.resizingBox.x + sizeMatch.heightMatch.resizingBox.w + 8 / (scale * view.scale),
+                      top: sizeMatch.heightMatch.resizingBox.y,
+                      width: 1.5 / (scale * view.scale),
+                      height: sizeMatch.heightMatch.resizingBox.h,
+                      background: '#ec4899',
+                      zIndex: 75,
+                    }}
+                  >
+                    <div style={{ position: 'absolute', top: 0, left: -3.5 / (scale * view.scale), width: 8.5 / (scale * view.scale), height: 1.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <div style={{ position: 'absolute', bottom: 0, left: -3.5 / (scale * view.scale), width: 8.5 / (scale * view.scale), height: 1.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: '50%',
+                        top: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        background: '#ec4899',
+                        color: '#fff',
+                        fontSize: Math.max(9, 10 / (scale * view.scale)),
+                        lineHeight: 1,
+                        padding: `${2 / (scale * view.scale)}px ${5 / (scale * view.scale)}px`,
+                        borderRadius: 3 / (scale * view.scale),
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                      }}
+                    >
+                      {Math.round(sizeMatch.heightMatch.size)} px
+                    </div>
+                  </div>
+
+                  {/* Dimension line on matched target element */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: sizeMatch.heightMatch.targetBox.x + sizeMatch.heightMatch.targetBox.w + 8 / (scale * view.scale),
+                      top: sizeMatch.heightMatch.targetBox.y,
+                      width: 1.5 / (scale * view.scale),
+                      height: sizeMatch.heightMatch.targetBox.h,
+                      background: '#ec4899',
+                      zIndex: 75,
+                    }}
+                  >
+                    <div style={{ position: 'absolute', top: 0, left: -3.5 / (scale * view.scale), width: 8.5 / (scale * view.scale), height: 1.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <div style={{ position: 'absolute', bottom: 0, left: -3.5 / (scale * view.scale), width: 8.5 / (scale * view.scale), height: 1.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: '50%',
+                        top: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        background: '#ec4899',
+                        color: '#fff',
+                        fontSize: Math.max(9, 10 / (scale * view.scale)),
+                        lineHeight: 1,
+                        padding: `${2 / (scale * view.scale)}px ${5 / (scale * view.scale)}px`,
+                        borderRadius: 3 / (scale * view.scale),
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                      }}
+                    >
+                      {Math.round(sizeMatch.heightMatch.size)} px
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* DISTANCE / GAP MATCH GUIDES & INDICATORS */}
+          {gapMatch && gapMatch.gaps.length > 0 && (
+            <div data-testid="gap-match-guides" className="pointer-events-none">
+              {gapMatch.gaps.map((gap, idx) => {
+                const eff = scale * view.scale
+                if (gap.axis === 'y') {
+                  const lineH = Math.max(1, gap.y2 - gap.y1)
+                  return (
+                    <div
+                      key={`gap-y-${idx}`}
+                      data-testid={`gap-guide-y-${idx}`}
+                      data-gap-size={gap.size}
+                      style={{
+                        position: 'absolute',
+                        left: gap.x1,
+                        top: gap.y1,
+                        width: 1.5 / eff,
+                        height: lineH,
+                        background: '#ec4899',
+                        zIndex: 75,
+                        transform: 'translateX(-50%)',
+                      }}
+                    >
+                      {/* Top end tick */}
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: '50%',
+                          transform: 'translateX(-50%)',
+                          width: 8.5 / eff,
+                          height: 1.5 / eff,
+                          background: '#ec4899',
+                        }}
+                      />
+                      {/* Bottom end tick */}
+                      <div
+                        style={{
+                          position: 'absolute',
+                          bottom: 0,
+                          left: '50%',
+                          transform: 'translateX(-50%)',
+                          width: 8.5 / eff,
+                          height: 1.5 / eff,
+                          background: '#ec4899',
+                        }}
+                      />
+                      {/* Gap measurement badge */}
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: '50%',
+                          top: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          background: '#ec4899',
+                          color: '#fff',
+                          fontSize: Math.max(9, 10 / eff),
+                          lineHeight: 1,
+                          padding: `${2 / eff}px ${5 / eff}px`,
+                          borderRadius: 3 / eff,
+                          fontWeight: 700,
+                          whiteSpace: 'nowrap',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                        }}
+                      >
+                        {Math.round(gap.size)} px
+                      </div>
+                    </div>
+                  )
+                }
+
+                // Horizontal gap
+                const lineW = Math.max(1, gap.x2 - gap.x1)
+                return (
+                  <div
+                    key={`gap-x-${idx}`}
+                    data-testid={`gap-guide-x-${idx}`}
+                    data-gap-size={gap.size}
+                    style={{
+                      position: 'absolute',
+                      left: gap.x1,
+                      top: gap.y1,
+                      width: lineW,
+                      height: 1.5 / eff,
+                      background: '#ec4899',
+                      zIndex: 75,
+                      transform: 'translateY(-50%)',
+                    }}
+                  >
+                    {/* Left end tick */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        width: 1.5 / eff,
+                        height: 8.5 / eff,
+                        background: '#ec4899',
+                      }}
+                    />
+                    {/* Right end tick */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        width: 1.5 / eff,
+                        height: 8.5 / eff,
+                        background: '#ec4899',
+                      }}
+                    />
+                    {/* Gap measurement badge */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: '50%',
+                        top: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        background: '#ec4899',
+                        color: '#fff',
+                        fontSize: Math.max(9, 10 / eff),
+                        lineHeight: 1,
+                        padding: `${2 / eff}px ${5 / eff}px`,
+                        borderRadius: 3 / eff,
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                      }}
+                    >
+                      {Math.round(gap.size)} px
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
         </div>
       )}
@@ -1741,6 +2384,72 @@ export default function Canvas() {
         />
       )}
 
+
+      {/* Floating nudge buttons in bottom-left corner */}
+      <div
+        data-testid="nudge-controls"
+        id="nudge-controls"
+        className="absolute bottom-3 left-3 z-40 flex items-center gap-1 rounded-full bg-black/60 px-2 py-1.5 text-xs font-semibold text-white backdrop-blur-md select-none border border-white/10 shadow-lg"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          data-testid="nudge-left"
+          id="nudge-left"
+          data-action="nudge-left"
+          data-direction="left"
+          type="button"
+          aria-label="Nudge left"
+          title="Nudge left (1px)"
+          onClick={() => handleNudge(-1, 0)}
+          className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          <span className="sr-only">Nudge left</span>
+        </button>
+        <button
+          data-testid="nudge-right"
+          id="nudge-right"
+          data-action="nudge-right"
+          data-direction="right"
+          type="button"
+          aria-label="Nudge right"
+          title="Nudge right (1px)"
+          onClick={() => handleNudge(1, 0)}
+          className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+        >
+          <ArrowRight className="h-3.5 w-3.5" />
+          <span className="sr-only">Nudge right</span>
+        </button>
+        <button
+          data-testid="nudge-up"
+          id="nudge-up"
+          data-action="nudge-up"
+          data-direction="up"
+          type="button"
+          aria-label="Nudge up"
+          title="Nudge up (1px)"
+          onClick={() => handleNudge(0, -1)}
+          className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+        >
+          <ArrowUp className="h-3.5 w-3.5" />
+          <span className="sr-only">Nudge up</span>
+        </button>
+        <button
+          data-testid="nudge-down"
+          id="nudge-down"
+          data-action="nudge-down"
+          data-direction="down"
+          type="button"
+          aria-label="Nudge down"
+          title="Nudge down (1px)"
+          onClick={() => handleNudge(0, 1)}
+          className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+        >
+          <ArrowDown className="h-3.5 w-3.5" />
+          <span className="sr-only">Nudge down</span>
+        </button>
+      </div>
 
       {view.scale !== 1 && (
         <button

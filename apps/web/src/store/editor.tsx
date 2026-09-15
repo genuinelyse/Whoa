@@ -22,6 +22,7 @@ interface State {
   time: number
   playing: boolean
   artboardSnap: boolean
+  timelineOpen: boolean
 }
 
 type Action =
@@ -46,6 +47,9 @@ type Action =
   | { t: 'setMode'; mode: 'static' | 'animated' }
   | { t: 'rename'; name: string }
   | { t: 'setDuration'; duration: number }
+  | { t: 'toggleTimeline'; open?: boolean }
+  | { t: 'setTimelineOpen'; open: boolean }
+  | { t: 'nudge'; dx: number; dy: number; measured?: Record<string, { x: number; y: number; w: number; h: number }> }
 
 function touch(p: Project): Project {
   return { ...p, updatedAt: Date.now() }
@@ -247,6 +251,78 @@ function reducer(state: State, a: Action): State {
 
       return { ...state, project: touch({ ...p, layers }) }
     }
+    case 'nudge': {
+      const targetId = state.selectedId || state.selectedIds[0] || null
+      if (!targetId) return state
+
+      // Determine all layers that should move together
+      const allIds = new Set<string>()
+      if (state.selectedIds.length > 1) {
+        for (const id of state.selectedIds) {
+          allIds.add(id)
+          const desc = getDescendantLayers(id, p.layers)
+          for (const d of desc) allIds.add(d.id)
+        }
+      } else {
+        const target = p.layers.find((l) => l.id === targetId)
+        if (!target || target.locked) return state
+        allIds.add(target.id)
+        if (target.type === 'group') {
+          const desc = getDescendantLayers(target.id, p.layers)
+          for (const d of desc) allIds.add(d.id)
+        }
+      }
+
+      let layers = p.layers.map((l) => {
+        if (!allIds.has(l.id) || l.locked) return l
+
+        const isCenteredTemplateText =
+          l.type === 'text' && l.align === 'center' && l.x === 0 && l.w === p.preset.w
+        const measuredBox = a.measured?.[l.id]
+
+        if (isCenteredTemplateText && measuredBox) {
+          return {
+            ...l,
+            x: Math.round(measuredBox.x + a.dx),
+            y: Math.round(measuredBox.y + a.dy),
+            w: Math.round(measuredBox.w),
+          }
+        }
+
+        return {
+          ...l,
+          x: Math.round(l.x + a.dx),
+          y: Math.round(l.y + a.dy),
+        }
+      })
+
+      // Recompute group bounds for any affected groups
+      const affectedGroupIds = new Set<string>()
+      for (const id of allIds) {
+        const l = p.layers.find((layer) => layer.id === id)
+        if (l?.type === 'group') affectedGroupIds.add(l.id)
+        if (l?.groupId) affectedGroupIds.add(l.groupId)
+      }
+
+      if (affectedGroupIds.size > 0) {
+        layers = layers.map((l) => {
+          if (!affectedGroupIds.has(l.id) || l.type !== 'group') return l
+          const bounds = computeGroupBounds(l.id, layers)
+          return {
+            ...l,
+            x: bounds.x,
+            y: bounds.y,
+            w: bounds.w,
+            h: bounds.h,
+          }
+        })
+      }
+
+      return {
+        ...state,
+        project: touch({ ...p, layers }),
+      }
+    }
     case 'tool':
       return { ...state, tool: a.tool }
     case 'addLayer':
@@ -334,6 +410,10 @@ function reducer(state: State, a: Action): State {
       return { ...state, project: touch({ ...p, name: a.name }) }
     case 'setDuration':
       return { ...state, project: touch({ ...p, duration: a.duration }) }
+    case 'toggleTimeline':
+      return { ...state, timelineOpen: a.open !== undefined ? a.open : !state.timelineOpen }
+    case 'setTimelineOpen':
+      return { ...state, timelineOpen: a.open }
     default:
       return state
   }
@@ -364,12 +444,15 @@ interface Ctx extends State {
   setMode: (m: 'static' | 'animated') => void
   rename: (n: string) => void
   setDuration: (d: number) => void
+  toggleTimeline: (open?: boolean) => void
+  setTimelineOpen: (open: boolean) => void
+  nudge: (dx: number, dy: number, measured?: Record<string, { x: number; y: number; w: number; h: number }>) => void
 }
 
 const EditorCtx = createContext<Ctx | null>(null)
 
 export function EditorProvider({ project, children }: { project: Project; children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false, artboardSnap: true })
+  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false, artboardSnap: true, timelineOpen: false })
 
   const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
@@ -414,6 +497,13 @@ export function EditorProvider({ project, children }: { project: Project; childr
   const setMode = useCallback((m: 'static' | 'animated') => dispatch({ t: 'setMode', mode: m }), [])
   const rename = useCallback((n: string) => dispatch({ t: 'rename', name: n }), [])
   const setDuration = useCallback((d: number) => dispatch({ t: 'setDuration', duration: d }), [])
+  const toggleTimeline = useCallback((open?: boolean) => dispatch({ t: 'toggleTimeline', open }), [])
+  const setTimelineOpen = useCallback((open: boolean) => dispatch({ t: 'setTimelineOpen', open }), [])
+  const nudge = useCallback(
+    (dx: number, dy: number, measured?: Record<string, { x: number; y: number; w: number; h: number }>) =>
+      dispatch({ t: 'nudge', dx, dy, measured }),
+    [],
+  )
 
   const addLayer = useCallback(
     (type: LayerType, extra?: Partial<Layer>) => {
@@ -433,8 +523,9 @@ export function EditorProvider({ project, children }: { project: Project; childr
       select, toggleSelect, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder,
       createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent,
       setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration,
+      toggleTimeline, setTimelineOpen, nudge,
     }),
-    [state, select, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration],
+    [state, select, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration, toggleTimeline, setTimelineOpen, nudge],
   )
 
   return <EditorCtx.Provider value={value}>{children}</EditorCtx.Provider>
