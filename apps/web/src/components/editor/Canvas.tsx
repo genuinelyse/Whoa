@@ -48,7 +48,7 @@ const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, h
 const tdist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
 const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 })
 
-const SNAP_TOLERANCE_PX = 2
+const SNAP_TOLERANCE_PX = 5
 
 type SnapCandidate = { delta: number; distance: number }
 
