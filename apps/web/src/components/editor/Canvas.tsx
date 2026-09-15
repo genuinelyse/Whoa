@@ -54,9 +54,13 @@ type SnapCandidate = { delta: number; distance: number; guide: number }
 
 function closestSnap(candidates: SnapCandidate[], tolerance: number) {
   const matches = candidates.filter((candidate) => candidate.distance <= tolerance).sort((a, b) => a.distance - b.distance)
+  if (matches.length === 0) {
+    return { delta: 0, guides: [] }
+  }
+  const bestDelta = matches[0].delta
   return {
-    delta: matches[0]?.delta ?? 0,
-    guides: matches.map((candidate) => candidate.guide),
+    delta: bestDelta,
+    guides: matches.filter((candidate) => candidate.delta === bestDelta).map((candidate) => candidate.guide),
   }
 }
 
@@ -162,7 +166,7 @@ export default function Canvas() {
   const [editingComponentId, setEditingComponentId] = useState<string | null>(null)
   const [multiSelectMode, setMultiSelectMode] = useState(false)
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
-  const [snapGuides, setSnapGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] })
+  const [snapGuides, setSnapGuides] = useState<{ active: boolean; xGuides: number[]; yGuides: number[] } | null>(null)
   const marqueeSession = useRef<{ active: boolean; start: { x: number; y: number }; update?: (event: PointerEvent) => void; finish?: (event: PointerEvent) => void }>({ active: false, start: { x: 0, y: 0 } })
   const marqueeLongPress = useRef<number | null>(null)
   const [pinchActive, setPinchActive] = useState(false)
@@ -237,7 +241,7 @@ export default function Canvas() {
       const dy = (e.clientY - g.sy) / eff
       if (g.mode === 'move') {
         const dist = Math.hypot(e.clientX - g.sx, e.clientY - g.sy)
-        if (dist > 8) {
+        if (dist > 4) {
           if (longPress.current) {
             window.clearTimeout(longPress.current)
             longPress.current = null
@@ -267,7 +271,11 @@ export default function Canvas() {
           const snap = artboardSnapRef.current
             ? snapDelta(bounds.left, bounds.top, targetW, targetH, preset.w, preset.h, SNAP_TOLERANCE_PX / eff)
             : { dx: 0, dy: 0, xGuides: [], yGuides: [] }
-          setSnapGuides({ x: snap.xGuides, y: snap.yGuides })
+          if (artboardSnapRef.current) {
+            setSnapGuides({ active: true, xGuides: snap.xGuides, yGuides: snap.yGuides })
+          } else {
+            setSnapGuides(null)
+          }
           if (g.group) {
             for (const item of g.group) {
               updateLayer(item.id, { x: Math.round(item.x + dx + snap.dx), y: Math.round(item.y + dy + snap.dy), w: item.w, h: item.h })
@@ -430,13 +438,15 @@ export default function Canvas() {
         if (g.isText) {
           const factor = Math.min(newW / g.ow, newH / g.oh)
           const fontSize = Math.max(6, Math.round(g.ofs * factor))
-          const patch: Partial<Layer> = { fontSize }
+          const patch: Partial<Layer> = {
+            fontSize,
+            x: Math.round(isLeft ? newX : g.ox),
+            y: Math.round(isTop ? newY : g.oy),
+          }
           if (g.origPadTop) patch.paddingTop = Math.round(g.origPadTop * factor)
           if (g.origPadRight) patch.paddingRight = Math.round(g.origPadRight * factor)
           if (g.origPadBottom) patch.paddingBottom = Math.round(g.origPadBottom * factor)
           if (g.origPadLeft) patch.paddingLeft = Math.round(g.origPadLeft * factor)
-          if (isLeft) patch.x = Math.round(newX)
-          if (isTop) patch.y = Math.round(newY)
           updateLayer(g.id, patch)
         } else {
           const factor = Math.min(newW / g.ow, newH / g.oh)
@@ -451,18 +461,18 @@ export default function Canvas() {
         if (g.isText || g.layerType === 'image' || g.layerType === 'sticker') {
           if (handle === 'r') {
             const newPadRight = Math.max(0, Math.round(g.origPadRight + dx))
-            updateLayer(g.id, { paddingRight: newPadRight })
+            updateLayer(g.id, { x: Math.round(g.ox), w: Math.round(g.ow), paddingRight: newPadRight })
           } else if (handle === 'l') {
             const newPadLeft = Math.max(0, Math.round(g.origPadLeft - dx))
             const deltaPad = newPadLeft - g.origPadLeft
-            updateLayer(g.id, { x: Math.round(g.ox - deltaPad), paddingLeft: newPadLeft })
+            updateLayer(g.id, { x: Math.round(g.ox - deltaPad), w: Math.round(g.ow), paddingLeft: newPadLeft })
           } else if (handle === 'b') {
             const newPadBottom = Math.max(0, Math.round(g.origPadBottom + dy))
-            updateLayer(g.id, { paddingBottom: newPadBottom })
+            updateLayer(g.id, { y: Math.round(g.oy), h: Math.round(g.oh), paddingBottom: newPadBottom })
           } else if (handle === 't') {
             const newPadTop = Math.max(0, Math.round(g.origPadTop - dy))
             const deltaPad = newPadTop - g.origPadTop
-            updateLayer(g.id, { y: Math.round(g.oy - deltaPad), paddingTop: newPadTop })
+            updateLayer(g.id, { y: Math.round(g.oy - deltaPad), h: Math.round(g.oh), paddingTop: newPadTop })
           }
         } else if (g.layerType === 'shape') {
           if (handle === 'r') {
@@ -511,7 +521,7 @@ export default function Canvas() {
       }
     gesture.current = null
     panGesture.current = null
-    setSnapGuides({ x: [], y: [] })
+    setSnapGuides(null)
   }
   window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -986,6 +996,10 @@ export default function Canvas() {
     const originW = group ? boxW : currentW
     const originH = group ? boxH : currentH
 
+    if (l.type === 'text' && l.align === 'center' && l.x === 0 && l.w === preset.w) {
+      updateLayer(l.id, { x: Math.round(originX), w: Math.round(originW) })
+    }
+
     let bgShapeIds: string[] | undefined = undefined
     let minFgLeft: number | undefined = undefined
     let maxFgRight: number | undefined = undefined
@@ -1338,12 +1352,78 @@ export default function Canvas() {
           style={{ width: preset.w, height: preset.h, transform: `scale(${scale})`, transformOrigin: 'center', ...bgStyle }}
           data-testid="artboard"
         >
-          {snapGuides.x.map((x) => (
-            <div key={`snap-x-${x}`} aria-hidden="true" data-testid="snap-guide-vertical" style={{ position: 'absolute', left: x, top: -48 / (scale * view.scale), height: preset.h + 96 / (scale * view.scale), borderLeft: `${1 / (scale * view.scale)}px dashed #0ea5e9`, pointerEvents: 'none', zIndex: 70 }} />
-          ))}
-          {snapGuides.y.map((y) => (
-            <div key={`snap-y-${y}`} aria-hidden="true" data-testid="snap-guide-horizontal" style={{ position: 'absolute', left: -48 / (scale * view.scale), top: y, width: preset.w + 96 / (scale * view.scale), borderTop: `${1 / (scale * view.scale)}px dashed #0ea5e9`, pointerEvents: 'none', zIndex: 70 }} />
-          ))}
+          {snapGuides && snapGuides.active && (
+            <>
+              <div
+                key="snap-x-center"
+                aria-hidden="true"
+                data-testid="snap-guide-vertical"
+                data-snapped={snapGuides.xGuides.includes(preset.w / 2)}
+                style={{
+                  position: 'absolute',
+                  left: preset.w / 2,
+                  top: -48 / eff,
+                  height: preset.h + 96 / eff,
+                  borderLeft: `${Math.max(1, 1.5 / eff)}px solid ${snapGuides.xGuides.includes(preset.w / 2) ? '#ff3b30' : '#eeeeee'}`,
+                  pointerEvents: 'none',
+                  zIndex: 70,
+                }}
+              />
+              {snapGuides.xGuides
+                .filter((x) => x !== preset.w / 2)
+                .map((x) => (
+                  <div
+                    key={`snap-x-${x}`}
+                    aria-hidden="true"
+                    data-testid="snap-guide-vertical"
+                    data-snapped="true"
+                    style={{
+                      position: 'absolute',
+                      left: x,
+                      top: -48 / eff,
+                      height: preset.h + 96 / eff,
+                      borderLeft: `${Math.max(1, 1.5 / eff)}px solid #ff3b30`,
+                      pointerEvents: 'none',
+                      zIndex: 70,
+                    }}
+                  />
+                ))}
+              <div
+                key="snap-y-center"
+                aria-hidden="true"
+                data-testid="snap-guide-horizontal"
+                data-snapped={snapGuides.yGuides.includes(preset.h / 2)}
+                style={{
+                  position: 'absolute',
+                  left: -48 / eff,
+                  top: preset.h / 2,
+                  width: preset.w + 96 / eff,
+                  borderTop: `${Math.max(1, 1.5 / eff)}px solid ${snapGuides.yGuides.includes(preset.h / 2) ? '#ff3b30' : '#eeeeee'}`,
+                  pointerEvents: 'none',
+                  zIndex: 70,
+                }}
+              />
+              {snapGuides.yGuides
+                .filter((y) => y !== preset.h / 2)
+                .map((y) => (
+                  <div
+                    key={`snap-y-${y}`}
+                    aria-hidden="true"
+                    data-testid="snap-guide-horizontal"
+                    data-snapped="true"
+                    style={{
+                      position: 'absolute',
+                      left: -48 / eff,
+                      top: y,
+                      width: preset.w + 96 / eff,
+                      borderTop: `${Math.max(1, 1.5 / eff)}px solid #ff3b30`,
+                      pointerEvents: 'none',
+                      zIndex: 70,
+                    }}
+                  />
+                ))}
+            </>
+          )}
           {project.layers.map((l) => {
             const a = anim(l, time, active)
             if (!l.visible || a.hidden) return null
@@ -1418,7 +1498,7 @@ export default function Canvas() {
                 data-testid={`layer-${l.id}`}
                 style={{
                   position: 'absolute',
-                  left: l.type === 'text' && l.align === 'center' && l.x === 0 && l.w === preset.w && layerRefs.current.get(l.id)
+                  left: l.type === 'text' && l.align === 'center' && l.x === 0 && l.w === preset.w && !l.paddingLeft && !l.paddingRight && layerRefs.current.get(l.id)
                     ? (preset.w - layerRefs.current.get(l.id)!.offsetWidth) / 2
                     : l.x,
                   top: l.y,
