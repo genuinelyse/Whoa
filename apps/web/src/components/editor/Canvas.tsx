@@ -48,6 +48,46 @@ const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, h
 const tdist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
 const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 })
 
+const SNAP_TOLERANCE_PX = 2
+
+type SnapCandidate = { delta: number; distance: number }
+
+function closestSnapDelta(candidates: SnapCandidate[], tolerance: number) {
+  const match = candidates
+    .filter((candidate) => candidate.distance <= tolerance)
+    .sort((a, b) => a.distance - b.distance)[0]
+  return match?.delta ?? 0
+}
+
+function snapDelta(left: number, top: number, w: number, h: number, artW: number, artH: number, tolerance: number) {
+  const right = left + w
+  const centerX = left + w / 2
+  const bottom = top + h
+  const centerY = top + h / 2
+  const artCenterX = artW / 2
+  const artCenterY = artH / 2
+
+  const xCandidates = [
+    { delta: -left, distance: Math.abs(left) },
+    { delta: artCenterX - left, distance: Math.abs(left - artCenterX) },
+    { delta: artW - right, distance: Math.abs(right - artW) },
+    { delta: artCenterX - right, distance: Math.abs(right - artCenterX) },
+    { delta: artCenterX - centerX, distance: Math.abs(centerX - artCenterX) },
+  ]
+  const yCandidates = [
+    { delta: artH - bottom, distance: Math.abs(bottom - artH) },
+    { delta: artCenterY - bottom, distance: Math.abs(bottom - artCenterY) },
+    { delta: -top, distance: Math.abs(top) },
+    { delta: artCenterY - top, distance: Math.abs(top - artCenterY) },
+    { delta: artCenterY - centerY, distance: Math.abs(centerY - artCenterY) },
+  ]
+
+  return {
+    dx: closestSnapDelta(xCandidates, tolerance),
+    dy: closestSnapDelta(yCandidates, tolerance),
+  }
+}
+
 type ResizeHandle = 'tl' | 'tr' | 'bl' | 'br' | 't' | 'r' | 'b' | 'l'
 type Gesture =
   | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean; deselectOnTap?: boolean; tapToggleId?: string; tapAddId?: string; group?: { id: string; x: number; y: number; w: number; h: number }[] }
@@ -111,7 +151,7 @@ type Pinch =
   | null
 
 export default function Canvas() {
-  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing } = useEditor()
+  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing, artboardSnap } = useEditor()
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingComponentId, setEditingComponentId] = useState<string | null>(null)
@@ -148,6 +188,8 @@ export default function Canvas() {
   layersRef.current = project.layers
   const selHRef = useRef(selH)
   selHRef.current = selH
+  const artboardSnapRef = useRef(artboardSnap)
+  artboardSnapRef.current = artboardSnap
   const { preset } = project
   const active = mode === 'animated' && !(!playing && time === 0)
 
@@ -201,10 +243,30 @@ export default function Canvas() {
           g.moved = true
         }
         if (g.moved) {
+          const rawX = g.ox + dx
+          const rawY = g.oy + dy
+          const bounds = g.group
+            ? g.group.reduce(
+                (box, item) => ({
+                  left: Math.min(box.left, item.x + dx),
+                  top: Math.min(box.top, item.y + dy),
+                  right: Math.max(box.right, item.x + dx + item.w),
+                  bottom: Math.max(box.bottom, item.y + dy + item.h),
+                }),
+                { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+              )
+            : { left: rawX, top: rawY, right: rawX + g.ow, bottom: rawY + g.oh }
+          const targetW = bounds.right - bounds.left
+          const targetH = bounds.bottom - bounds.top
+          const snap = artboardSnapRef.current
+            ? snapDelta(bounds.left, bounds.top, targetW, targetH, preset.w, preset.h, SNAP_TOLERANCE_PX / eff)
+            : { dx: 0, dy: 0 }
           if (g.group) {
-            for (const item of g.group) updateLayer(item.id, { x: Math.round(item.x + dx), y: Math.round(item.y + dy), w: item.w, h: item.h })
+            for (const item of g.group) {
+              updateLayer(item.id, { x: Math.round(item.x + dx + snap.dx), y: Math.round(item.y + dy + snap.dy), w: item.w, h: item.h })
+            }
           } else {
-            updateLayer(g.id, { x: Math.round(g.ox + dx), y: Math.round(g.oy + dy), w: g.ow, h: g.oh })
+            updateLayer(g.id, { x: Math.round(rawX + snap.dx), y: Math.round(rawY + snap.dy), w: g.ow, h: g.oh })
           }
         }
         return

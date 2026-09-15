@@ -21,6 +21,7 @@ interface State {
   tool: string | null
   time: number
   playing: boolean
+  artboardSnap: boolean
 }
 
 type Action =
@@ -41,6 +42,7 @@ type Action =
   | { t: 'setBackground'; bg: Background }
   | { t: 'setTime'; time: number }
   | { t: 'setPlaying'; playing: boolean }
+  | { t: 'setArtboardSnap'; enabled: boolean }
   | { t: 'setMode'; mode: 'static' | 'animated' }
   | { t: 'rename'; name: string }
   | { t: 'setDuration'; duration: number }
@@ -324,6 +326,8 @@ function reducer(state: State, a: Action): State {
       return { ...state, time: a.time }
     case 'setPlaying':
       return { ...state, playing: a.playing }
+    case 'setArtboardSnap':
+      return { ...state, artboardSnap: a.enabled }
     case 'setMode':
       return { ...state, project: touch({ ...p, mode: a.mode }) }
     case 'rename':
@@ -356,6 +360,7 @@ interface Ctx extends State {
   setBackground: (bg: Background) => void
   setTime: (t: number) => void
   setPlaying: (v: boolean) => void
+  setArtboardSnap: (v: boolean) => void
   setMode: (m: 'static' | 'animated') => void
   rename: (n: string) => void
   setDuration: (d: number) => void
@@ -364,7 +369,7 @@ interface Ctx extends State {
 const EditorCtx = createContext<Ctx | null>(null)
 
 export function EditorProvider({ project, children }: { project: Project; children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false })
+  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false, artboardSnap: true })
 
   const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
@@ -405,6 +410,7 @@ export function EditorProvider({ project, children }: { project: Project; childr
   const setBackground = useCallback((bg: Background) => dispatch({ t: 'setBackground', bg }), [])
   const setTime = useCallback((t: number) => dispatch({ t: 'setTime', time: t }), [])
   const setPlaying = useCallback((v: boolean) => dispatch({ t: 'setPlaying', playing: v }), [])
+  const setArtboardSnap = useCallback((v: boolean) => dispatch({ t: 'setArtboardSnap', enabled: v }), [])
   const setMode = useCallback((m: 'static' | 'animated') => dispatch({ t: 'setMode', mode: m }), [])
   const rename = useCallback((n: string) => dispatch({ t: 'rename', name: n }), [])
   const setDuration = useCallback((d: number) => dispatch({ t: 'setDuration', duration: d }), [])
@@ -426,9 +432,9 @@ export function EditorProvider({ project, children }: { project: Project; childr
       selectedIds: state.selectedIds,
       select, toggleSelect, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder,
       createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent,
-      setBackground, setTime, setPlaying, setMode, rename, setDuration,
+      setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration,
     }),
-    [state, select, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setMode, rename, setDuration],
+    [state, select, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration],
   )
 
   return <EditorCtx.Provider value={value}>{children}</EditorCtx.Provider>

@@ -3,15 +3,16 @@ import {
   Copy, Trash2, Wand2, Droplets, AlignLeft, Bold, PaintBucket, Square,
   ArrowUp, ArrowDown, Scissors, Crop, FolderPlus, Ungroup, Component as ComponentIcon,
   AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignVerticalJustifyCenter,
+  Magnet,
 } from 'lucide-react'
 import { useEditor } from '#/store/editor'
 
-type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () => void; danger?: boolean; accent?: boolean }
+type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () => void; danger?: boolean; accent?: boolean; active?: boolean }
 
 export default function Toolbar() {
   const {
     project, selected, selectedIds, alignSelected, openTool, deleteLayer, duplicate, reorder,
-    createGroup, ungroup, saveAsComponent,
+    createGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
   } = useEditor()
 
   let items: Item[] = []
@@ -150,7 +151,9 @@ export default function Toolbar() {
           ? 'text-danger'
           : it.accent
             ? 'text-purple-400 font-semibold'
-            : 'text-txt'
+            : it.active
+              ? 'bg-accent/20 text-accent'
+              : 'text-txt'
       }`}
     >
       <span className="[&>svg]:h-5 [&>svg]:w-5">{it.icon}</span>
@@ -158,8 +161,17 @@ export default function Toolbar() {
     </button>
   )
 
+  const snapItem: Item = {
+    key: 'artboard-snap',
+    label: artboardSnap ? 'Snap on' : 'Snap',
+    icon: <Magnet />,
+    active: artboardSnap,
+    onClick: () => setArtboardSnap(!artboardSnap),
+  }
+
   return (
     <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">
+      {renderItem(snapItem)}
       <div className={`flex shrink-0 items-center gap-1 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[400px] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
         {groupItems.map(renderItem)}
       </div>
