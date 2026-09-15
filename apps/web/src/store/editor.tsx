@@ -1,6 +1,18 @@
 import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react'
 import type { Project, Layer, LayerType, Background } from '#/types'
-import { createLayer, uid } from '#/lib/data'
+import { createLayer } from '#/lib/data'
+import {
+  createGroupFromSelection,
+  ungroupLayer,
+  duplicateLayerOrGroup,
+  deleteLayerOrGroup,
+  reorderSibling,
+  instantiateComponent,
+  saveComponentToLibrary,
+  getDescendantLayers,
+  computeGroupBounds,
+  type ComponentItem,
+} from '#/lib/groups'
 
 interface State {
   project: Project
@@ -14,13 +26,18 @@ interface State {
 type Action =
   | { t: 'select'; id: string | null; additive?: boolean; ids?: string[] }
   | { t: 'toggleSelect'; id: string }
-  | { t: 'alignSelected'; mode: 'left' | 'center' | 'right' | 'middle'; measured?: Record<string, { x: number; y: number; w: number; h: number }> }
+  | { t: 'alignSelected'; mode: 'left' | 'center' | 'right' | 'middle'; measured?: Record<string, { x: number; y: number; w: number; h: number }>; targetGroupId?: string }
   | { t: 'tool'; tool: string | null }
   | { t: 'addLayer'; layer: Layer }
   | { t: 'updateLayer'; id: string; patch: Partial<Layer> }
   | { t: 'deleteLayer'; id: string }
   | { t: 'reorder'; id: string; dir: number }
   | { t: 'duplicate'; id: string }
+  | { t: 'createGroup'; ids?: string[]; name?: string; isComponent?: boolean }
+  | { t: 'ungroup'; groupId: string }
+  | { t: 'toggleGroupCollapse'; groupId: string }
+  | { t: 'insertComponent'; component: ComponentItem }
+  | { t: 'convertToComponent'; groupId: string; name?: string }
   | { t: 'setBackground'; bg: Background }
   | { t: 'setTime'; time: number }
   | { t: 'setPlaying'; playing: boolean }
@@ -48,12 +65,124 @@ function reducer(state: State, a: Action): State {
       return { ...state, selectedIds, selectedId: selectedIds.at(-1) ?? null }
     }
     case 'alignSelected': {
+      // Check if we are aligning the children of a single group
+      const targetGroupId =
+        a.targetGroupId ||
+        (state.selectedIds.length === 1 && p.layers.find((l) => l.id === state.selectedIds[0])?.type === 'group'
+          ? state.selectedIds[0]
+          : undefined)
+
+      if (targetGroupId) {
+        const groupLayer = p.layers.find((l) => l.id === targetGroupId)
+        if (!groupLayer) return state
+
+        // Direct children of this group (non-locked, visible)
+        const children = p.layers.filter((l) => l.groupId === targetGroupId && l.visible && !l.locked)
+        if (children.length === 0) return state
+
+        const getBox = (layer: Layer) => {
+          if (a.measured && a.measured[layer.id]) {
+            return a.measured[layer.id]
+          }
+          if (layer.type === 'group') {
+            return computeGroupBounds(layer.id, p.layers)
+          }
+          const isCenteredTemplateText =
+            layer.type === 'text' && layer.align === 'center' && layer.x === 0 && layer.w === p.preset.w
+          const x = isCenteredTemplateText ? (p.preset.w - layer.w) / 2 : layer.x
+          return { x, y: layer.y, w: layer.w, h: layer.h }
+        }
+
+        const boxes = new Map(children.map((layer) => [layer.id, getBox(layer)]))
+        const left = Math.min(...children.map((l) => boxes.get(l.id)!.x))
+        const right = Math.max(...children.map((l) => boxes.get(l.id)!.x + boxes.get(l.id)!.w))
+        const top = Math.min(...children.map((l) => boxes.get(l.id)!.y))
+        const bottom = Math.max(...children.map((l) => boxes.get(l.id)!.y + boxes.get(l.id)!.h))
+
+        // Compute new positions and displacement deltas for each child
+        const childDeltas = new Map<string, { dx: number; dy: number; newX: number; newY: number; w: number; h: number }>()
+        for (const child of children) {
+          const b = boxes.get(child.id)!
+          const nx =
+            a.mode === 'left'
+              ? left
+              : a.mode === 'right'
+                ? right - b.w
+                : a.mode === 'center'
+                  ? (left + right - b.w) / 2
+                  : b.x
+          const ny = a.mode === 'middle' ? (top + bottom - b.h) / 2 : b.y
+          childDeltas.set(child.id, {
+            dx: Math.round(nx) - b.x,
+            dy: Math.round(ny) - b.y,
+            newX: Math.round(nx),
+            newY: Math.round(ny),
+            w: Math.round(b.w),
+            h: Math.round(b.h),
+          })
+        }
+
+        // Sub-group descendants delta mapping
+        const descendantDeltas = new Map<string, { dx: number; dy: number }>()
+        for (const child of children) {
+          if (child.type === 'group') {
+            const desc = getDescendantLayers(child.id, p.layers)
+            const delta = childDeltas.get(child.id)!
+            for (const d of desc) {
+              descendantDeltas.set(d.id, { dx: delta.dx, dy: delta.dy })
+            }
+          }
+        }
+
+        let updatedLayers = p.layers.map((layer) => {
+          if (childDeltas.has(layer.id)) {
+            const d = childDeltas.get(layer.id)!
+            return {
+              ...layer,
+              x: d.newX,
+              y: d.newY,
+              w: layer.type === 'group' ? layer.w : d.w,
+              h: layer.type === 'group' ? layer.h : d.h,
+            }
+          }
+          if (descendantDeltas.has(layer.id)) {
+            const d = descendantDeltas.get(layer.id)!
+            return {
+              ...layer,
+              x: Math.round(layer.x + d.dx),
+              y: Math.round(layer.y + d.dy),
+            }
+          }
+          return layer
+        })
+
+        // Recompute the parent group bounds to fit the newly aligned children
+        const newGroupBounds = computeGroupBounds(targetGroupId, updatedLayers)
+        updatedLayers = updatedLayers.map((l) =>
+          l.id === targetGroupId
+            ? {
+                ...l,
+                x: newGroupBounds.x,
+                y: newGroupBounds.y,
+                w: newGroupBounds.w,
+                h: newGroupBounds.h,
+              }
+            : l
+        )
+
+        return { ...state, project: touch({ ...p, layers: updatedLayers }) }
+      }
+
+      // Multi-selection alignment
       const selected = p.layers.filter((layer) => state.selectedIds.includes(layer.id))
       if (selected.length < 2) return state
 
       const getBox = (layer: Layer) => {
         if (a.measured && a.measured[layer.id]) {
           return a.measured[layer.id]
+        }
+        if (layer.type === 'group') {
+          return computeGroupBounds(layer.id, p.layers)
         }
         const isCenteredTemplateText =
           layer.type === 'text' && layer.align === 'center' && layer.x === 0 && layer.w === p.preset.w
@@ -67,7 +196,9 @@ function reducer(state: State, a: Action): State {
       const top = Math.min(...selected.map((l) => boxes.get(l.id)!.y))
       const bottom = Math.max(...selected.map((l) => boxes.get(l.id)!.y + boxes.get(l.id)!.h))
 
-      const layers = p.layers.map((layer) => {
+      const groupDeltas = new Map<string, { dx: number; dy: number }>()
+
+      let layers = p.layers.map((layer) => {
         if (!state.selectedIds.includes(layer.id)) return layer
         const b = boxes.get(layer.id)!
         const x =
@@ -79,14 +210,39 @@ function reducer(state: State, a: Action): State {
                 ? (left + right - b.w) / 2
                 : b.x
         const y = a.mode === 'middle' ? (top + bottom - b.h) / 2 : b.y
+        const newX = Math.round(x)
+        const newY = Math.round(y)
+
+        if (layer.type === 'group') {
+          groupDeltas.set(layer.id, { dx: newX - b.x, dy: newY - b.y })
+        }
+
         return {
           ...layer,
-          x: Math.round(x),
-          y: Math.round(y),
-          w: Math.round(b.w),
-          h: Math.round(b.h),
+          x: newX,
+          y: newY,
+          w: layer.type === 'group' ? layer.w : Math.round(b.w),
+          h: layer.type === 'group' ? layer.h : Math.round(b.h),
         }
       })
+
+      // Shift descendants of any moved groups that were selected
+      if (groupDeltas.size > 0) {
+        layers = layers.map((layer) => {
+          for (const [groupId, delta] of groupDeltas.entries()) {
+            const desc = getDescendantLayers(groupId, p.layers)
+            if (desc.some((d) => d.id === layer.id)) {
+              return {
+                ...layer,
+                x: Math.round(layer.x + delta.dx),
+                y: Math.round(layer.y + delta.dy),
+              }
+            }
+          }
+          return layer
+        })
+      }
+
       return { ...state, project: touch({ ...p, layers }) }
     }
     case 'tool':
@@ -95,27 +251,71 @@ function reducer(state: State, a: Action): State {
       return { ...state, project: touch({ ...p, layers: [...p.layers, a.layer] }), selectedId: a.layer.id, selectedIds: [a.layer.id], tool: null }
     case 'updateLayer':
       return { ...state, project: touch({ ...p, layers: p.layers.map((l) => (l.id === a.id ? { ...l, ...a.patch } : l)) }) }
-    case 'deleteLayer':
+    case 'createGroup': {
+      const targetIds = a.ids || state.selectedIds
+      if (!targetIds || targetIds.length === 0) return state
+      try {
+        const { newLayers, groupLayer } = createGroupFromSelection(p.layers, targetIds, a.name, a.isComponent)
+        return {
+          ...state,
+          project: touch({ ...p, layers: newLayers }),
+          selectedId: groupLayer.id,
+          selectedIds: [groupLayer.id],
+        }
+      } catch (err) {
+        console.warn('Failed to create group:', err)
+        return state
+      }
+    }
+    case 'ungroup': {
+      const { newLayers, unpackedIds } = ungroupLayer(p.layers, a.groupId)
       return {
         ...state,
-        project: touch({ ...p, layers: p.layers.filter((l) => l.id !== a.id) }),
-        selectedId: state.selectedId === a.id ? null : state.selectedId,
-        selectedIds: state.selectedIds.filter((id) => id !== a.id),
+        project: touch({ ...p, layers: newLayers }),
+        selectedId: unpackedIds[0] || null,
+        selectedIds: unpackedIds,
       }
+    }
+    case 'toggleGroupCollapse': {
+      const layers = p.layers.map((l) => (l.id === a.groupId ? { ...l, collapsed: !l.collapsed } : l))
+      return { ...state, project: touch({ ...p, layers }) }
+    }
+    case 'insertComponent': {
+      const { rootLayer, childLayers } = instantiateComponent(a.component, p.preset)
+      const layers = [...p.layers, ...childLayers, rootLayer]
+      return {
+        ...state,
+        project: touch({ ...p, layers }),
+        selectedId: rootLayer.id,
+        selectedIds: [rootLayer.id],
+        tool: null,
+      }
+    }
+    case 'convertToComponent': {
+      const layers = p.layers.map((l) => (l.id === a.groupId ? { ...l, isComponent: true, name: a.name || l.name } : l))
+      return { ...state, project: touch({ ...p, layers }) }
+    }
+    case 'deleteLayer': {
+      const layers = deleteLayerOrGroup(p.layers, a.id)
+      const remainingIds = state.selectedIds.filter((id) => layers.some((l) => l.id === id))
+      return {
+        ...state,
+        project: touch({ ...p, layers }),
+        selectedId: layers.some((l) => l.id === state.selectedId) ? state.selectedId : remainingIds[0] || null,
+        selectedIds: remainingIds,
+      }
+    }
     case 'duplicate': {
-      const src = p.layers.find((l) => l.id === a.id)
-      if (!src) return state
-      const copy: Layer = { ...src, id: uid(), x: src.x + 24, y: src.y + 24, name: src.name + ' copy' }
-      return { ...state, project: touch({ ...p, layers: [...p.layers, copy] }), selectedId: copy.id }
+      const { newLayers, newSelectedId } = duplicateLayerOrGroup(p.layers, a.id)
+      return {
+        ...state,
+        project: touch({ ...p, layers: newLayers }),
+        selectedId: newSelectedId,
+        selectedIds: [newSelectedId],
+      }
     }
     case 'reorder': {
-      const idx = p.layers.findIndex((l) => l.id === a.id)
-      if (idx < 0) return state
-      const ni = idx + a.dir
-      if (ni < 0 || ni >= p.layers.length) return state
-      const layers = [...p.layers]
-      const [moved] = layers.splice(idx, 1)
-      layers.splice(ni, 0, moved)
+      const layers = reorderSibling(p.layers, a.id, a.dir)
       return { ...state, project: touch({ ...p, layers }) }
     }
     case 'setBackground':
@@ -141,13 +341,18 @@ interface Ctx extends State {
   selectedIds: string[]
   select: (id: string | null, additive?: boolean, ids?: string[]) => void
   toggleSelect: (id: string) => void
-  alignSelected: (mode: 'left' | 'center' | 'right' | 'middle', measured?: Record<string, { x: number; y: number; w: number; h: number }>) => void
+  alignSelected: (mode: 'left' | 'center' | 'right' | 'middle', measured?: Record<string, { x: number; y: number; w: number; h: number }>, targetGroupId?: string) => void
   openTool: (tool: string | null) => void
   addLayer: (type: LayerType, extra?: Partial<Layer>) => void
   updateLayer: (id: string, patch: Partial<Layer>) => void
   deleteLayer: (id: string) => void
   duplicate: (id: string) => void
   reorder: (id: string, dir: number) => void
+  createGroup: (ids?: string[], name?: string, isComponent?: boolean) => void
+  ungroup: (groupId: string) => void
+  toggleGroupCollapse: (groupId: string) => void
+  insertComponent: (component: ComponentItem) => void
+  saveAsComponent: (name: string, targetId?: string) => ComponentItem | null
   setBackground: (bg: Background) => void
   setTime: (t: number) => void
   setPlaying: (v: boolean) => void
@@ -163,12 +368,40 @@ export function EditorProvider({ project, children }: { project: Project; childr
 
   const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
-  const alignSelected = useCallback((mode: 'left' | 'center' | 'right' | 'middle', measured?: Record<string, { x: number; y: number; w: number; h: number }>) => dispatch({ t: 'alignSelected', mode, measured }), [])
+  const alignSelected = useCallback((mode: 'left' | 'center' | 'right' | 'middle', measured?: Record<string, { x: number; y: number; w: number; h: number }>, targetGroupId?: string) => dispatch({ t: 'alignSelected', mode, measured, targetGroupId }), [])
   const openTool = useCallback((tool: string | null) => dispatch({ t: 'tool', tool }), [])
   const updateLayer = useCallback((id: string, patch: Partial<Layer>) => dispatch({ t: 'updateLayer', id, patch }), [])
   const deleteLayer = useCallback((id: string) => dispatch({ t: 'deleteLayer', id }), [])
   const duplicate = useCallback((id: string) => dispatch({ t: 'duplicate', id }), [])
   const reorder = useCallback((id: string, dir: number) => dispatch({ t: 'reorder', id, dir }), [])
+  const createGroup = useCallback((ids?: string[], name?: string, isComponent = false) => dispatch({ t: 'createGroup', ids, name, isComponent }), [])
+  const ungroup = useCallback((groupId: string) => dispatch({ t: 'ungroup', groupId }), [])
+  const toggleGroupCollapse = useCallback((groupId: string) => dispatch({ t: 'toggleGroupCollapse', groupId }), [])
+  const insertComponent = useCallback((component: ComponentItem) => dispatch({ t: 'insertComponent', component }), [])
+
+  const saveAsComponent = useCallback((name: string, targetId?: string): ComponentItem | null => {
+    const id = targetId || state.selectedId
+    if (!id) return null
+    let group = state.project.layers.find((l) => l.id === id)
+
+    // If target is not already a group, but we have multiple items selected, group them first
+    if (!group || group.type !== 'group') {
+      if (state.selectedIds.length > 0) {
+        const { newLayers, groupLayer } = createGroupFromSelection(state.project.layers, state.selectedIds, name, true)
+        const descendants = getDescendantLayers(groupLayer.id, newLayers)
+        const saved = saveComponentToLibrary(name, groupLayer, descendants, state.project.preset)
+        dispatch({ t: 'createGroup', ids: state.selectedIds, name, isComponent: true })
+        return saved
+      }
+      return null
+    }
+
+    const descendants = getDescendantLayers(group.id, state.project.layers)
+    const saved = saveComponentToLibrary(name, group, descendants, state.project.preset)
+    dispatch({ t: 'convertToComponent', groupId: group.id, name })
+    return saved
+  }, [state.selectedId, state.selectedIds, state.project.layers, state.project.preset])
+
   const setBackground = useCallback((bg: Background) => dispatch({ t: 'setBackground', bg }), [])
   const setTime = useCallback((t: number) => dispatch({ t: 'setTime', time: t }), [])
   const setPlaying = useCallback((v: boolean) => dispatch({ t: 'setPlaying', playing: v }), [])
@@ -192,9 +425,10 @@ export function EditorProvider({ project, children }: { project: Project; childr
       selected: state.project.layers.find((l) => l.id === state.selectedId) || null,
       selectedIds: state.selectedIds,
       select, toggleSelect, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder,
+      createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent,
       setBackground, setTime, setPlaying, setMode, rename, setDuration,
     }),
-    [state, select, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder, setBackground, setTime, setPlaying, setMode, rename, setDuration],
+    [state, select, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setMode, rename, setDuration],
   )
 
   return <EditorCtx.Provider value={value}>{children}</EditorCtx.Provider>

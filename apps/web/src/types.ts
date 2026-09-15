@@ -1,4 +1,4 @@
-export type LayerType = 'text' | 'shape' | 'image' | 'sticker'
+export type LayerType = 'text' | 'shape' | 'image' | 'sticker' | 'group'
 export type ShapeKind = 'rect' | 'circle' | 'triangle' | 'star' | 'line'
 export type BgType = 'color' | 'gradient' | 'image'
 
@@ -33,9 +33,19 @@ export interface Layer {
   shape?: ShapeKind
   fill?: string
   radius?: number
+  // padding
+  paddingTop?: number
+  paddingRight?: number
+  paddingBottom?: number
+  paddingLeft?: number
   // image / sticker
   src?: string
   emoji?: string
+  // group / component hierarchy
+  groupId?: string
+  isComponent?: boolean
+  componentId?: string
+  collapsed?: boolean
 }
 
 export interface Preset {

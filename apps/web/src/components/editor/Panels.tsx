@@ -1,13 +1,18 @@
-import { useRef } from 'react'
-import { X, Upload, Type as TypeIcon } from 'lucide-react'
+import { useRef, useState, useEffect } from 'react'
+import {
+  X, Upload, Type as TypeIcon, Folder, FolderPlus,
+  Component as ComponentIcon, ChevronRight, ChevronDown, Plus, Trash2,
+} from 'lucide-react'
 import { useEditor } from '#/store/editor'
-import type { ShapeKind } from '#/types'
+import type { ShapeKind, Layer } from '#/types'
 import {
   FONTS, PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
 } from '#/lib/data'
+import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } from '#/lib/groups'
 
 const TITLES: Record<string, string> = {
   text: 'Add Text', elements: 'Elements', stickers: 'Stickers', image: 'Image',
+  components: 'Components Library',
   background: 'Background', layers: 'Layers', font: 'Font', color: 'Color',
   style: 'Text Style', align: 'Alignment', shape: 'Shape', radius: 'Corner Radius',
   opacity: 'Opacity', animate: 'Animation', mask: 'Mask & Cut', crop: 'Crop',
@@ -20,7 +25,7 @@ export default function ToolSheet() {
     <div className="absolute inset-0 z-40 flex flex-col justify-end" data-testid="tool-sheet">
       <div className="absolute inset-0 bg-black/40 animate-fade" onClick={() => openTool(null)} />
       <div className="animate-sheet relative max-h-[70vh] overflow-y-auto rounded-t-3xl border-t border-line bg-surface pb-8 no-scrollbar">
-        <div className="sticky top-0 flex items-center justify-between bg-surface px-5 pt-4 pb-3">
+        <div className="sticky top-0 flex items-center justify-between bg-surface px-5 pt-4 pb-3 z-10">
           <h3 className="text-lg font-bold">{TITLES[tool] || 'Options'}</h3>
           <button onClick={() => openTool(null)} data-testid="sheet-close" className="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-txt2">
             <X className="h-4 w-4" />
@@ -45,6 +50,7 @@ function PanelBody({ tool }: { tool: string }) {
     case 'elements': return <Elements />
     case 'stickers': return <Stickers />
     case 'image': return <Images />
+    case 'components': return <ComponentsPanel />
     case 'background': return <BackgroundPanel />
     case 'layers': return <LayersPanel />
     case 'font': return <FontPanel />
@@ -223,29 +229,364 @@ function BackgroundPanel() {
   )
 }
 
+/* ---------- Components Panel ---------- */
+function ComponentsPanel() {
+  const { selected, selectedIds, insertComponent, saveAsComponent, openTool } = useEditor()
+  const [components, setComponents] = useState<ComponentItem[]>([])
+  const [newCompName, setNewCompName] = useState('')
+  const [savedFeedback, setSavedFeedback] = useState<string | null>(null)
+
+  const reload = () => {
+    setComponents(getLibraryComponents())
+  }
+
+  useEffect(() => {
+    reload()
+  }, [])
+
+  const handleSaveCurrent = () => {
+    const name = newCompName.trim() || 'New Component'
+    saveAsComponent(name, selected?.type === 'group' ? selected.id : undefined)
+    setNewCompName('')
+    setSavedFeedback(`"${name}" saved to library!`)
+    reload()
+    setTimeout(() => setSavedFeedback(null), 2500)
+  }
+
+  const handleDelete = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    deleteComponentFromLibrary(id)
+    reload()
+  }
+
+  const handleInsert = (c: ComponentItem) => {
+    insertComponent(c)
+    openTool(null)
+  }
+
+  const customComponents = components.filter((c) => !c.id.startsWith('stock-'))
+  const stockComponents = components.filter((c) => c.id.startsWith('stock-'))
+  const hasSelection = selectedIds.length > 0 || selected != null
+
+  return (
+    <div className="space-y-4 pb-6">
+      {/* Save Selection Card */}
+      <div className="rounded-2xl border border-purple-500/30 bg-purple-950/20 p-3.5 space-y-2.5">
+        <div className="flex items-center gap-2">
+          <ComponentIcon className="h-4 w-4 text-purple-400" />
+          <span className="text-xs font-semibold text-purple-200">
+            {hasSelection ? 'Save Selection as Reusable Component' : 'Create Component'}
+          </span>
+        </div>
+        <p className="text-[11px] text-txt3 leading-relaxed">
+          Components preserve all included elements, hierarchy, styles, and animation effects for reuse across creatives.
+        </p>
+        {hasSelection ? (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Component name (e.g. Header Banner)"
+              value={newCompName}
+              onChange={(e) => setNewCompName(e.target.value)}
+              className="flex-1 rounded-xl border border-line bg-surface px-3 py-2 text-xs text-txt placeholder:text-txt3 focus:border-purple-400 focus:outline-none"
+            />
+            <button
+              onClick={handleSaveCurrent}
+              className="flex items-center gap-1.5 rounded-xl bg-purple-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-purple-500 active:scale-95 transition-all"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Save
+            </button>
+          </div>
+        ) : (
+          <p className="text-[11px] text-txt3 italic">
+            Select one or more layers on the canvas to save them as a component.
+          </p>
+        )}
+        {savedFeedback && (
+          <p className="text-xs font-medium text-emerald-400 animate-fade">{savedFeedback}</p>
+        )}
+      </div>
+
+      {/* User Saved Custom Components */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-txt3">Saved in Library</h4>
+          <span className="text-[11px] text-txt3">{customComponents.length} custom</span>
+        </div>
+
+        {customComponents.length === 0 ? (
+          <div className="rounded-xl border border-line/60 bg-surface2/50 p-4 text-center">
+            <p className="text-xs text-txt3">No custom components saved yet</p>
+            <p className="text-[11px] text-txt3/70 mt-1">Multi-select elements and click "Make Component" to save here.</p>
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            {customComponents.map((c) => {
+              const anims = Array.from(
+                new Set(c.layers.map((l: Layer) => l.anim).filter((a) => Boolean(a && a !== 'none')))
+              )
+              return (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between rounded-xl border border-line bg-surface2 p-3 hover:border-purple-400/50 transition-colors"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <ComponentIcon className="h-3.5 w-3.5 text-purple-400" />
+                      <span className="text-xs font-semibold text-white">{c.name}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-txt3">
+                        {c.layers.length} elements
+                      </span>
+                      {anims.map((a: string) => (
+                        <span key={a} className="rounded bg-purple-950/60 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 text-[10px]">
+                          {a}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => handleInsert(c)}
+                      className="flex items-center gap-1 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-500 active:scale-95 transition-all"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Insert
+                    </button>
+                    <button
+                      onClick={(e) => handleDelete(c.id, e)}
+                      className="p-1.5 text-txt3 hover:text-danger rounded-lg transition-colors"
+                      title="Delete component from library"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Preset Starter Components */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-txt3">Preset Components</h4>
+          <span className="text-[11px] text-txt3">{stockComponents.length} templates</span>
+        </div>
+        <div className="grid gap-2">
+          {stockComponents.map((c) => {
+            const anims = Array.from(
+              new Set(c.layers.map((l: Layer) => l.anim).filter((a) => Boolean(a && a !== 'none')))
+            )
+            return (
+              <div
+                key={c.id}
+                className="flex items-center justify-between rounded-xl border border-line bg-surface2 p-3 hover:border-indigo-400/50 transition-colors"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <ComponentIcon className="h-3.5 w-3.5 text-indigo-400" />
+                    <span className="text-xs font-semibold text-white">{c.name}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-txt3">
+                      {c.layers.length} elements
+                    </span>
+                    {anims.map((a: string) => (
+                      <span key={a} className="rounded bg-indigo-950/60 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 text-[10px]">
+                        {a}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleInsert(c)}
+                  className="flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 active:scale-95 transition-all"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Insert
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ---------- Layers ---------- */
 function LayersPanel() {
-  const { project, selectedId, select, updateLayer, deleteLayer, reorder } = useEditor()
-  const layers = [...project.layers].reverse()
-  const label = (l: any) => l.type === 'text' ? (l.text || 'Text').slice(0, 18) : l.type === 'sticker' ? `Sticker ${l.emoji}` : l.name
+  const {
+    project, selectedId, selectedIds, select, updateLayer, deleteLayer,
+    reorder, createGroup, ungroup, saveAsComponent, toggleGroupCollapse,
+  } = useEditor()
+
+  const label = (l: any) =>
+    l.type === 'text' ? (l.text || 'Text').slice(0, 18) : l.type === 'sticker' ? `Sticker ${l.emoji}` : l.name
+
+  // Hierarchical list of layers
+  const layerMap = new Map(project.layers.map((l) => [l.id, l]))
+  const rootLayers = project.layers.filter((l) => !l.groupId || !layerMap.has(l.groupId)).reverse()
+
+  const renderNode = (layer: any, depth: number) => {
+    const isGroup = layer.type === 'group'
+    const isComponent = Boolean(layer.isComponent)
+    const children = project.layers.filter((l: any) => l.groupId === layer.id).reverse()
+    const isSelected = selectedId === layer.id || selectedIds.includes(layer.id)
+    const collapsed = Boolean(layer.collapsed)
+
+    return (
+      <div key={layer.id} className="space-y-1">
+        <div
+          data-testid={`layer-row-${layer.id}`}
+          onClick={() => select(layer.id)}
+          className={`flex items-center gap-2 rounded-xl border px-3 py-2 transition-colors cursor-pointer ${
+            isSelected
+              ? isComponent
+                ? 'border-purple-500 bg-purple-950/30'
+                : isGroup
+                  ? 'border-indigo-500 bg-indigo-950/30'
+                  : 'border-accent bg-accent/10'
+              : 'border-line bg-surface2 hover:border-white/20'
+          }`}
+          style={{ marginLeft: `${depth * 16}px` }}
+        >
+          {isGroup && children.length > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleGroupCollapse(layer.id)
+              }}
+              className="p-0.5 text-txt3 hover:text-white"
+            >
+              {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+          )}
+
+          {isComponent ? (
+            <ComponentIcon className="h-4 w-4 text-purple-400 shrink-0" />
+          ) : isGroup ? (
+            <Folder className="h-4 w-4 text-indigo-400 shrink-0" />
+          ) : (
+            <span
+              className="h-4 w-4 rounded-md shrink-0"
+              style={{ background: layer.type === 'shape' ? layer.fill : layer.type === 'text' ? layer.color : '#3B82F6' }}
+            />
+          )}
+
+          <span className="flex-1 truncate text-xs font-medium">
+            {label(layer)}
+          </span>
+
+          {isGroup && (
+            <span
+              className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                isComponent ? 'bg-purple-500/30 text-purple-200' : 'bg-indigo-500/30 text-indigo-200'
+              }`}
+            >
+              {isComponent ? 'COMPONENT' : 'GROUP'}
+            </span>
+          )}
+
+          {isGroup && (
+            <button
+              data-testid={`ungroup-${layer.id}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                ungroup(layer.id)
+              }}
+              className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-txt2 hover:text-white"
+              title="Ungroup"
+            >
+              Ungroup
+            </button>
+          )}
+
+          <button
+            data-testid={`layer-vis-${layer.id}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              updateLayer(layer.id, { visible: !layer.visible })
+            }}
+            className="px-1 text-xs text-txt2 hover:text-white"
+          >
+            {layer.visible ? 'Hide' : 'Show'}
+          </button>
+          <button
+            data-testid={`layer-up-${layer.id}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              reorder(layer.id, 1)
+            }}
+            className="px-1 text-xs text-txt2 hover:text-white"
+            title="Move up"
+          >
+            ↑
+          </button>
+          <button
+            data-testid={`layer-down-${layer.id}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              reorder(layer.id, -1)
+            }}
+            className="px-1 text-xs text-txt2 hover:text-white"
+            title="Move down"
+          >
+            ↓
+          </button>
+          <button
+            data-testid={`layer-del-${layer.id}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              deleteLayer(layer.id)
+            }}
+            className="px-1 text-xs text-danger"
+            title="Delete"
+          >
+            ✕
+          </button>
+        </div>
+
+        {isGroup && !collapsed && (
+          <div className="space-y-1">
+            {children.map((child: any) => renderNode(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-2 pb-4">
-      {layers.length === 0 && <p className="py-8 text-center text-sm text-txt3">No layers yet</p>}
-      {layers.map((l) => (
-        <div
-          key={l.id}
-          data-testid={`layer-row-${l.id}`}
-          onClick={() => select(l.id)}
-          className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${selectedId === l.id ? 'border-accent bg-accent/10' : 'border-line bg-surface2'}`}
-        >
-          <span className="h-6 w-6 rounded-md" style={{ background: l.type === 'shape' ? l.fill : l.type === 'text' ? l.color : '#3B82F6' }} />
-          <span className="flex-1 truncate text-sm font-medium">{label(l)}</span>
-          <button data-testid={`layer-vis-${l.id}`} onClick={(e) => { e.stopPropagation(); updateLayer(l.id, { visible: !l.visible }) }} className="px-1 text-xs text-txt2">{l.visible ? 'Hide' : 'Show'}</button>
-          <button data-testid={`layer-up-${l.id}`} onClick={(e) => { e.stopPropagation(); reorder(l.id, 1) }} className="px-1 text-txt2">↑</button>
-          <button data-testid={`layer-down-${l.id}`} onClick={(e) => { e.stopPropagation(); reorder(l.id, -1) }} className="px-1 text-txt2">↓</button>
-          <button data-testid={`layer-del-${l.id}`} onClick={(e) => { e.stopPropagation(); deleteLayer(l.id) }} className="px-1 text-danger">✕</button>
+      {/* Top actions if multi-selected */}
+      {selectedIds.length > 1 && (
+        <div className="flex gap-2 mb-3">
+          <button
+            onClick={() => createGroup()}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm active:scale-95 transition-all"
+          >
+            <FolderPlus className="h-3.5 w-3.5" />
+            Group Selected ({selectedIds.length})
+          </button>
+          <button
+            onClick={() => {
+              const name = prompt('Component name:', 'New Component') || 'New Component'
+              saveAsComponent(name)
+            }}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-sm active:scale-95 transition-all"
+          >
+            <ComponentIcon className="h-3.5 w-3.5" />
+            Make Component
+          </button>
         </div>
-      ))}
+      )}
+
+      {rootLayers.length === 0 && <p className="py-8 text-center text-sm text-txt3">No layers yet</p>}
+      {rootLayers.map((root) => renderNode(root, 0))}
     </div>
   )
 }
