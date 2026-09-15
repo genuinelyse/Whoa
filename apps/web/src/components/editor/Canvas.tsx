@@ -48,15 +48,16 @@ const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, h
 const tdist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
 const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 })
 
-const SNAP_TOLERANCE_PX = 2
+const SNAP_TOLERANCE_PX = 8
 
-type SnapCandidate = { delta: number; distance: number }
+type SnapCandidate = { delta: number; distance: number; guide: number }
 
-function closestSnapDelta(candidates: SnapCandidate[], tolerance: number) {
-  const match = candidates
-    .filter((candidate) => candidate.distance <= tolerance)
-    .sort((a, b) => a.distance - b.distance)[0]
-  return match?.delta ?? 0
+function closestSnap(candidates: SnapCandidate[], tolerance: number) {
+  const matches = candidates.filter((candidate) => candidate.distance <= tolerance).sort((a, b) => a.distance - b.distance)
+  return {
+    delta: matches[0]?.delta ?? 0,
+    guides: matches.map((candidate) => candidate.guide),
+  }
 }
 
 function snapDelta(left: number, top: number, w: number, h: number, artW: number, artH: number, tolerance: number) {
@@ -68,23 +69,27 @@ function snapDelta(left: number, top: number, w: number, h: number, artW: number
   const artCenterY = artH / 2
 
   const xCandidates = [
-    { delta: -left, distance: Math.abs(left) },
-    { delta: artCenterX - left, distance: Math.abs(left - artCenterX) },
-    { delta: artW - right, distance: Math.abs(right - artW) },
-    { delta: artCenterX - right, distance: Math.abs(right - artCenterX) },
-    { delta: artCenterX - centerX, distance: Math.abs(centerX - artCenterX) },
+    { delta: -left, distance: Math.abs(left), guide: 0 },
+    { delta: artCenterX - left, distance: Math.abs(left - artCenterX), guide: artCenterX },
+    { delta: artW - right, distance: Math.abs(right - artW), guide: artW },
+    { delta: artCenterX - right, distance: Math.abs(right - artCenterX), guide: artCenterX },
+    { delta: artCenterX - centerX, distance: Math.abs(centerX - artCenterX), guide: artCenterX },
   ]
   const yCandidates = [
-    { delta: artH - bottom, distance: Math.abs(bottom - artH) },
-    { delta: artCenterY - bottom, distance: Math.abs(bottom - artCenterY) },
-    { delta: -top, distance: Math.abs(top) },
-    { delta: artCenterY - top, distance: Math.abs(top - artCenterY) },
-    { delta: artCenterY - centerY, distance: Math.abs(centerY - artCenterY) },
+    { delta: artH - bottom, distance: Math.abs(bottom - artH), guide: artH },
+    { delta: artCenterY - bottom, distance: Math.abs(bottom - artCenterY), guide: artCenterY },
+    { delta: -top, distance: Math.abs(top), guide: 0 },
+    { delta: artCenterY - top, distance: Math.abs(top - artCenterY), guide: artCenterY },
+    { delta: artCenterY - centerY, distance: Math.abs(centerY - artCenterY), guide: artCenterY },
   ]
 
+  const xSnap = closestSnap(xCandidates, tolerance)
+  const ySnap = closestSnap(yCandidates, tolerance)
   return {
-    dx: closestSnapDelta(xCandidates, tolerance),
-    dy: closestSnapDelta(yCandidates, tolerance),
+    dx: xSnap.delta,
+    dy: ySnap.delta,
+    xGuides: [...new Set(xSnap.guides)],
+    yGuides: [...new Set(ySnap.guides)],
   }
 }
 
@@ -157,6 +162,7 @@ export default function Canvas() {
   const [editingComponentId, setEditingComponentId] = useState<string | null>(null)
   const [multiSelectMode, setMultiSelectMode] = useState(false)
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const [snapGuides, setSnapGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] })
   const marqueeSession = useRef<{ active: boolean; start: { x: number; y: number }; update?: (event: PointerEvent) => void; finish?: (event: PointerEvent) => void }>({ active: false, start: { x: 0, y: 0 } })
   const marqueeLongPress = useRef<number | null>(null)
   const [pinchActive, setPinchActive] = useState(false)
@@ -260,7 +266,8 @@ export default function Canvas() {
           const targetH = bounds.bottom - bounds.top
           const snap = artboardSnapRef.current
             ? snapDelta(bounds.left, bounds.top, targetW, targetH, preset.w, preset.h, SNAP_TOLERANCE_PX / eff)
-            : { dx: 0, dy: 0 }
+            : { dx: 0, dy: 0, xGuides: [], yGuides: [] }
+          setSnapGuides({ x: snap.xGuides, y: snap.yGuides })
           if (g.group) {
             for (const item of g.group) {
               updateLayer(item.id, { x: Math.round(item.x + dx + snap.dx), y: Math.round(item.y + dy + snap.dy), w: item.w, h: item.h })
@@ -502,10 +509,11 @@ export default function Canvas() {
           setEditingComponentId(currentSel.id)
         }
       }
-      gesture.current = null
-      panGesture.current = null
-    }
-    window.addEventListener('pointermove', move)
+    gesture.current = null
+    panGesture.current = null
+    setSnapGuides({ x: [], y: [] })
+  }
+  window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', up)
     return () => {
@@ -1330,6 +1338,12 @@ export default function Canvas() {
           style={{ width: preset.w, height: preset.h, transform: `scale(${scale})`, transformOrigin: 'center', ...bgStyle }}
           data-testid="artboard"
         >
+          {snapGuides.x.map((x) => (
+            <div key={`snap-x-${x}`} aria-hidden="true" data-testid="snap-guide-vertical" style={{ position: 'absolute', left: x, top: -48 / (scale * view.scale), height: preset.h + 96 / (scale * view.scale), borderLeft: `${1 / (scale * view.scale)}px dashed #0ea5e9`, pointerEvents: 'none', zIndex: 70 }} />
+          ))}
+          {snapGuides.y.map((y) => (
+            <div key={`snap-y-${y}`} aria-hidden="true" data-testid="snap-guide-horizontal" style={{ position: 'absolute', left: -48 / (scale * view.scale), top: y, width: preset.w + 96 / (scale * view.scale), borderTop: `${1 / (scale * view.scale)}px dashed #0ea5e9`, pointerEvents: 'none', zIndex: 70 }} />
+          ))}
           {project.layers.map((l) => {
             const a = anim(l, time, active)
             if (!l.visible || a.hidden) return null
