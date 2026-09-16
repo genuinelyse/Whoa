@@ -128,6 +128,7 @@ export function createLayer(type: LayerType, preset: Preset, extra: Partial<Laye
       x: (preset.w - w) / 2,
       y: preset.h * 0.25,
       anim: 'fade',
+      lockProportions: false,
     })
   } else if (type === 'sticker') {
     const s = preset.w * 0.22

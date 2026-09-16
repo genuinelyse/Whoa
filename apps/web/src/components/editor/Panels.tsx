@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from 'react'
 import {
   X, Upload, Type as TypeIcon, Folder, FolderPlus,
   Component as ComponentIcon, ChevronRight, ChevronDown, Plus, Trash2,
+  Lock, Unlock,
 } from 'lucide-react'
 import { useEditor } from '#/store/editor'
 import type { ShapeKind, Layer } from '#/types'
@@ -162,8 +163,48 @@ function Images() {
     r.onload = () => apply(r.result as string)
     r.readAsDataURL(f)
   }
+
+  const isImageSelected = Boolean(selected && selected.type === 'image')
+  const isLocked = isImageSelected ? Boolean(selected?.lockProportions) : false
+
   return (
     <div className="pb-4">
+      {isImageSelected && selected && (
+        <div
+          id="image-lock-proportions-container"
+          data-testid="image-lock-proportions-container"
+          className="mb-4 flex items-center justify-between rounded-2xl border border-line bg-surface2 px-4 py-3"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className={`grid h-8 w-8 place-items-center rounded-xl transition-colors ${isLocked ? 'bg-accent/20 text-accent' : 'bg-surface text-txt3'}`}>
+              {isLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+            </div>
+            <div>
+              <div className="text-sm font-semibold text-txt">Lock proportions</div>
+              <div className="text-[11px] text-txt3">Maintain aspect ratio while resizing</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isLocked}
+            id="lock-proportions-toggle"
+            data-testid="lock-proportions-toggle"
+            aria-label={isLocked ? 'Unlock proportions' : 'Lock proportions'}
+            title={isLocked ? 'Unlock proportions' : 'Lock proportions'}
+            onClick={() => updateLayer(selected.id, { lockProportions: !isLocked })}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              isLocked ? 'bg-accent' : 'bg-surface'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                isLocked ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+      )}
       <button
         onClick={() => fileRef.current?.click()}
         data-testid="upload-image-btn"

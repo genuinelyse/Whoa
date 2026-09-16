@@ -431,8 +431,21 @@ function reducer(state: State, a: Action): State {
       return { ...state, tool: a.tool }
     case 'addLayer':
       return { ...state, project: touch({ ...p, layers: [...p.layers, a.layer] }), selectedId: a.layer.id, selectedIds: [a.layer.id], tool: null }
-    case 'updateLayer':
-      return { ...state, project: touch({ ...p, layers: p.layers.map((l) => (l.id === a.id ? { ...l, ...a.patch } : l)) }) }
+    case 'updateLayer': {
+      let layers = p.layers.map((l) => (l.id === a.id ? { ...l, ...a.patch } : l))
+      const targetLayer = layers.find((l) => l.id === a.id)
+      if (targetLayer?.groupId) {
+        let currGroupId: string | undefined = targetLayer.groupId
+        while (currGroupId) {
+          const bounds = computeGroupBounds(currGroupId, layers)
+          const gId: string = currGroupId
+          layers = layers.map((l) => (l.id === gId ? { ...l, ...bounds } : l))
+          const parent = layers.find((l) => l.id === gId)
+          currGroupId = parent?.groupId
+        }
+      }
+      return { ...state, project: touch({ ...p, layers }) }
+    }
     case 'updateLayers':
       return { ...state, project: touch({ ...p, layers: p.layers.map((l) => (a.ids.includes(l.id) ? { ...l, ...a.patch } : l)) }) }
     case 'createGroup': {

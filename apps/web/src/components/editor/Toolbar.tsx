@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from 'react'
 import {
   Type, Shapes, Sticker, Image as ImageIcon, Layers as LayersIcon, Palette,
   Copy, Trash2, Wand2, AlignLeft, Bold, PaintBucket, Square,
@@ -5,7 +6,8 @@ import {
   AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd,
   AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
-  Magnet, ChevronUp, ChevronDown,
+  Magnet, ChevronUp, ChevronDown, Lock, Unlock,
+  Move, ArrowUpToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Ratio, LayoutGrid,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
 
@@ -15,8 +17,241 @@ export default function Toolbar() {
   const {
     project, selected, selectedIds, alignSelected, openTool, deleteLayer, deleteLayers, duplicate, reorder,
     createGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
-    timelineOpen, toggleTimeline,
+    timelineOpen, toggleTimeline, updateLayer,
   } = useEditor()
+
+  const [isAlignExpanded, setIsAlignExpanded] = useState(false)
+  const [positionMode, setPositionMode] = useState<string | null>(null)
+  const alignPillRef = useRef<HTMLDivElement>(null)
+
+  const isImageSelected = Boolean(selected && selected.type === 'image')
+
+  useEffect(() => {
+    if (!isImageSelected) {
+      setIsAlignExpanded(false)
+      setPositionMode(null)
+    }
+  }, [selected?.id, isImageSelected])
+
+  useEffect(() => {
+    if (!isAlignExpanded) return
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (alignPillRef.current && !alignPillRef.current.contains(e.target as Node)) {
+        setIsAlignExpanded(false)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsAlignExpanded(false)
+      }
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [isAlignExpanded])
+
+  const handleFreeHand = () => {
+    setPositionMode('freehand')
+  }
+
+  const handleTop = () => {
+    if (!selected) return
+    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
+    for (const id of ids) {
+      const layer = project.layers.find((l) => l.id === id)
+      if (layer && layer.type === 'image') {
+        updateLayer(id, { y: 0 })
+      }
+    }
+    setPositionMode('top')
+  }
+
+  const handleMid = () => {
+    if (!selected) return
+    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
+    for (const id of ids) {
+      const layer = project.layers.find((l) => l.id === id)
+      if (layer && layer.type === 'image') {
+        const newX = Math.round((project.preset.w - layer.w) / 2)
+        const newY = Math.round((project.preset.h - layer.h) / 2)
+        updateLayer(id, { x: newX, y: newY })
+      }
+    }
+    setPositionMode('mid')
+  }
+
+  const handleLeft = () => {
+    if (!selected) return
+    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
+    for (const id of ids) {
+      const layer = project.layers.find((l) => l.id === id)
+      if (layer && layer.type === 'image') {
+        updateLayer(id, { x: 0 })
+      }
+    }
+    setPositionMode('left')
+  }
+
+  const handleRight = () => {
+    if (!selected) return
+    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
+    for (const id of ids) {
+      const layer = project.layers.find((l) => l.id === id)
+      if (layer && layer.type === 'image') {
+        const newX = Math.max(0, Math.round(project.preset.w - layer.w))
+        updateLayer(id, { x: newX })
+      }
+    }
+    setPositionMode('right')
+  }
+
+  const handleContain = () => {
+    if (!selected) return
+    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
+    for (const id of ids) {
+      const layer = project.layers.find((l) => l.id === id)
+      if (!layer || layer.type !== 'image') continue
+
+      const domImg = (document.querySelector(`[data-testid="layer-${id}"] img`) ||
+        document.querySelector(`[data-layer-id="${id}"] img`)) as HTMLImageElement | null
+
+      const applyContain = (r: number) => {
+        const ratio = r > 0 && !isNaN(r) ? r : (layer.w / layer.h)
+        let newW = project.preset.w
+        let newH = Math.round(newW / ratio)
+        if (newH > project.preset.h) {
+          newH = project.preset.h
+          newW = Math.round(newH * ratio)
+        }
+        const newX = Math.round((project.preset.w - newW) / 2)
+        const newY = Math.round((project.preset.h - newH) / 2)
+        updateLayer(id, {
+          x: newX,
+          y: newY,
+          w: newW,
+          h: newH,
+        })
+      }
+
+      if (domImg && domImg.naturalWidth > 0 && domImg.naturalHeight > 0) {
+        applyContain(domImg.naturalWidth / domImg.naturalHeight)
+      } else if (layer.src) {
+        const temp = new Image()
+        temp.onload = () => {
+          if (temp.naturalWidth > 0 && temp.naturalHeight > 0) {
+            applyContain(temp.naturalWidth / temp.naturalHeight)
+          } else {
+            applyContain(layer.w / layer.h)
+          }
+        }
+        temp.onerror = () => applyContain(layer.w / layer.h)
+        temp.src = layer.src
+      } else {
+        applyContain(layer.w / layer.h)
+      }
+    }
+    setPositionMode('contain')
+  }
+
+  const handleOriginalRatio = () => {
+    if (!selected) return
+    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
+    for (const id of ids) {
+      const layer = project.layers.find((l) => l.id === id)
+      if (!layer || layer.type !== 'image') continue
+
+      const domImg = (document.querySelector(`[data-testid="layer-${id}"] img`) ||
+        document.querySelector(`[data-layer-id="${id}"] img`)) as HTMLImageElement | null
+
+      const applyOrigRatio = (r: number) => {
+        const ratio = r > 0 && !isNaN(r) ? r : (layer.w / layer.h)
+        let newW = layer.w
+        let newH = Math.round(newW / ratio)
+        if (newH > project.preset.h) {
+          newH = project.preset.h
+          newW = Math.round(newH * ratio)
+        }
+        if (newW > project.preset.w) {
+          newW = project.preset.w
+          newH = Math.round(newW / ratio)
+        }
+        const newX = Math.round(layer.x + (layer.w - newW) / 2)
+        const newY = Math.round(layer.y + (layer.h - newH) / 2)
+        updateLayer(id, {
+          w: newW,
+          h: newH,
+          x: newX,
+          y: newY,
+        })
+      }
+
+      if (domImg && domImg.naturalWidth > 0 && domImg.naturalHeight > 0) {
+        applyOrigRatio(domImg.naturalWidth / domImg.naturalHeight)
+      } else if (layer.src) {
+        const temp = new Image()
+        temp.onload = () => {
+          if (temp.naturalWidth > 0 && temp.naturalHeight > 0) {
+            applyOrigRatio(temp.naturalWidth / temp.naturalHeight)
+          } else {
+            applyOrigRatio(layer.w / layer.h)
+          }
+        }
+        temp.onerror = () => applyOrigRatio(layer.w / layer.h)
+        temp.src = layer.src
+      } else {
+        applyOrigRatio(layer.w / layer.h)
+      }
+    }
+    setPositionMode('original-aspect-ratio')
+  }
+
+  const bgAlignItems = [
+    {
+      key: 'freehand',
+      label: 'Free-hand positioning',
+      icon: <Move className="h-4 w-4" />,
+      onClick: handleFreeHand,
+    },
+    {
+      key: 'top',
+      label: 'Top',
+      icon: <ArrowUpToLine className="h-4 w-4" />,
+      onClick: handleTop,
+    },
+    {
+      key: 'mid',
+      label: 'Mid',
+      icon: <AlignVerticalJustifyCenter className="h-4 w-4" />,
+      onClick: handleMid,
+    },
+    {
+      key: 'left',
+      label: 'Left',
+      icon: <ArrowLeftToLine className="h-4 w-4" />,
+      onClick: handleLeft,
+    },
+    {
+      key: 'right',
+      label: 'Right',
+      icon: <ArrowRightToLine className="h-4 w-4" />,
+      onClick: handleRight,
+    },
+    {
+      key: 'contain',
+      label: 'Contain',
+      icon: <Maximize2 className="h-4 w-4" />,
+      onClick: handleContain,
+    },
+    {
+      key: 'original-aspect-ratio',
+      label: 'Original aspect ratio',
+      icon: <Ratio className="h-4 w-4" />,
+      onClick: handleOriginalRatio,
+    },
+  ]
 
   let items: Item[] = []
 
@@ -33,8 +268,6 @@ export default function Toolbar() {
   } else {
     const common: Item[] = [
       { key: 'animate', label: 'Animate', icon: <Wand2 /> },
-      { key: 'up', label: 'Forward', icon: <ArrowUp />, onClick: () => reorder(selected.id, 1) },
-      { key: 'down', label: 'Back', icon: <ArrowDown />, onClick: () => reorder(selected.id, -1) },
       { key: 'dup', label: 'Duplicate', icon: <Copy />, onClick: () => duplicate(selected.id) },
       { key: 'del', label: 'Delete', icon: <Trash2 />, onClick: () => (isMulti ? deleteLayers(selectedIds) : deleteLayer(selected.id)), danger: true },
     ]
@@ -76,7 +309,15 @@ export default function Toolbar() {
         ...common,
       ]
     } else if (selected.type === 'image') {
+      const isLocked = Boolean(selected.lockProportions)
       items = [
+        {
+          key: 'lock-proportions',
+          label: isLocked ? 'Unlock proportions' : 'Lock proportions',
+          icon: isLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />,
+          active: isLocked,
+          onClick: () => updateLayer(selected.id, { lockProportions: !isLocked }),
+        },
         { key: 'image', label: 'Replace', icon: <ImageIcon /> },
         { key: 'crop', label: 'Crop', icon: <Crop /> },
         { key: 'mask', label: 'Mask', icon: <Scissors /> },
@@ -146,7 +387,7 @@ export default function Toolbar() {
       ]
     : alignOptions
 
-  const floatingActionKeys = new Set(['color', 'dup', 'del'])
+  const floatingActionKeys = new Set(['color', 'lock-proportions', 'dup', 'del'])
   const floatingItems = selected ? items.filter((it) => floatingActionKeys.has(it.key)) : []
   const toolbarItems = selected ? items.filter((it) => !floatingActionKeys.has(it.key)) : items
 
@@ -205,29 +446,185 @@ export default function Toolbar() {
     onClick: () => toggleTimeline(),
   }
 
+  const parentGroupId = selected?.groupId
+  const siblings = selected ? project.layers.filter((l) => l.groupId === parentGroupId) : []
+  const sIdx = selected ? siblings.findIndex((l) => l.id === selected.id) : -1
+  const canMoveForward = selectedIds.length > 1 ? true : (sIdx >= 0 && sIdx < siblings.length - 1)
+  const canMoveBackward = selectedIds.length > 1 ? true : (sIdx > 0)
+
+  const handleReorder = (dir: 1 | -1) => {
+    if (!selected) return
+    if (selectedIds.length > 1) {
+      const ids = dir > 0 ? [...selectedIds].reverse() : [...selectedIds]
+      for (const id of ids) {
+        reorder(id, dir)
+      }
+    } else {
+      reorder(selected.id, dir)
+    }
+  }
+
   return (
     <>
-      {floatingItems.length > 0 && (
+      {Boolean(selected) && (
         <div
-          className="absolute bottom-[4.5rem] right-3 z-30 flex items-center gap-1 rounded-2xl border border-white/10 bg-black/70 p-1.5 shadow-xl backdrop-blur-md"
-          data-testid="floating-action-group"
-          aria-label="Layer actions"
+          className={`absolute right-3 z-40 flex flex-col items-end gap-2 select-none pointer-events-none transition-[bottom] duration-200 ${
+            timelineOpen ? 'bottom-[19.5rem]' : 'bottom-[4.5rem]'
+          }`}
         >
-          {floatingItems.map((it) => (
+          {/* Floating background positions alignment button for image elements */}
+          {isImageSelected && (
+            <div
+              ref={alignPillRef}
+              id="image-bg-align-container"
+              data-testid="image-bg-align-container"
+              className="pointer-events-auto relative flex flex-col items-end"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isAlignExpanded ? (
+                <div
+                  id="image-bg-align-pill"
+                  data-testid="image-bg-align-pill"
+                  role="toolbar"
+                  aria-label="Background positions alignment controls"
+                  className="flex flex-col items-center gap-1 rounded-full border border-white/10 bg-black/80 p-1.5 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all duration-200 animate-in fade-in zoom-in-95 slide-in-from-bottom-2"
+                >
+                  {bgAlignItems.map((item) => {
+                    const isActive = positionMode === item.key
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        id={`image-align-${item.key}-btn`}
+                        data-testid={`image-align-${item.key}-btn`}
+                        data-action={item.key}
+                        data-align-action={item.key}
+                        aria-label={item.label}
+                        aria-pressed={isActive}
+                        title={item.label}
+                        onClick={item.onClick}
+                        className={`grid h-8 w-8 place-items-center rounded-full transition-all active:scale-90 focus:outline-none ${
+                          isActive
+                            ? 'bg-accent text-white shadow-sm ring-1 ring-accent/60'
+                            : 'text-white/85 hover:bg-white/20 hover:text-white'
+                        }`}
+                      >
+                        <span className="[&>svg]:h-4 [&>svg]:w-4 flex items-center justify-center">{item.icon}</span>
+                      </button>
+                    )
+                  })}
+                  <div className="my-0.5 h-px w-4 bg-white/20" />
+                  <button
+                    type="button"
+                    id="image-bg-align-btn"
+                    data-testid="image-bg-align-btn"
+                    aria-label="Collapse background positions alignment"
+                    title="Collapse"
+                    aria-expanded={true}
+                    onClick={() => setIsAlignExpanded(false)}
+                    className="grid h-8 w-8 place-items-center rounded-full text-white/60 transition-all hover:bg-white/20 hover:text-white active:scale-90 focus:outline-none"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  id="image-bg-align-btn"
+                  data-testid="image-bg-align-btn"
+                  aria-label="Background positions alignment"
+                  title="Background positions alignment"
+                  aria-expanded={false}
+                  onClick={() => setIsAlignExpanded(true)}
+                  className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/60 text-white/90 shadow-lg backdrop-blur-md transition-all hover:bg-white/20 hover:text-white active:scale-90 focus:outline-none"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Vertical pill button for layer Forward & Backward */}
+          <div
+            id="layer-reorder-pill"
+            data-testid="layer-reorder-pill"
+            aria-label="Layer order controls"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="pointer-events-auto flex flex-col items-center gap-1 rounded-full border border-white/10 bg-black/60 px-1.5 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur-md"
+          >
             <button
-              key={it.key}
               type="button"
-              data-testid={`floating-tool-${it.key}`}
-              aria-label={it.label}
-              title={it.label}
-              onClick={() => (it.onClick ? it.onClick() : openTool(it.key))}
-              className={`grid h-10 w-10 place-items-center rounded-xl transition-colors active:scale-95 ${
-                it.danger ? 'text-danger hover:bg-danger/15' : 'text-white/85 hover:bg-white/10 hover:text-white'
+              id="layer-forward-btn"
+              data-testid="layer-forward-btn"
+              aria-label="Bring forward"
+              title="Bring forward"
+              disabled={!canMoveForward}
+              onClick={() => handleReorder(1)}
+              className={`grid h-6 w-6 place-items-center rounded-full transition-all focus:outline-none ${
+                !canMoveForward
+                  ? 'opacity-40 cursor-not-allowed text-white/40'
+                  : 'text-white/90 hover:bg-white/20 hover:text-white active:scale-90'
               }`}
             >
-              <span className="[&>svg]:h-5 [&>svg]:w-5">{it.icon}</span>
+              <ArrowUp className="h-3.5 w-3.5" />
             </button>
-          ))}
+            <button
+              type="button"
+              id="layer-backward-btn"
+              data-testid="layer-backward-btn"
+              aria-label="Send backward"
+              title="Send backward"
+              disabled={!canMoveBackward}
+              onClick={() => handleReorder(-1)}
+              className={`grid h-6 w-6 place-items-center rounded-full transition-all focus:outline-none ${
+                !canMoveBackward
+                  ? 'opacity-40 cursor-not-allowed text-white/40'
+                  : 'text-white/90 hover:bg-white/20 hover:text-white active:scale-90'
+              }`}
+            >
+              <ArrowDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {/* Floating element control panel */}
+          {floatingItems.length > 0 && (
+            <div
+              id="floating-action-group"
+              data-testid="floating-action-group"
+              aria-label="Layer actions"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-black/60 px-2 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur-md"
+            >
+              {floatingItems.map((it) => {
+                const isLockProp = it.key === 'lock-proportions'
+                return (
+                  <button
+                    key={it.key}
+                    type="button"
+                    id={isLockProp ? 'lock-proportions-btn' : `floating-tool-${it.key}`}
+                    data-testid={isLockProp ? 'lock-proportions-btn' : `floating-tool-${it.key}`}
+                    data-floating-tool={it.key}
+                    aria-label={it.label}
+                    aria-pressed={isLockProp ? Boolean(it.active) : undefined}
+                    title={it.label}
+                    onClick={() => (it.onClick ? it.onClick() : openTool(it.key))}
+                    className={`grid h-6 w-6 place-items-center rounded-full transition-all active:scale-90 focus:outline-none ${
+                      it.danger
+                        ? 'text-danger hover:bg-danger/20 hover:text-red-400'
+                        : it.active
+                          ? 'bg-accent text-white shadow-sm ring-1 ring-accent/60'
+                          : 'text-white/90 hover:bg-white/20 hover:text-white'
+                    }`}
+                  >
+                    <span className="[&>svg]:h-3.5 [&>svg]:w-3.5">{it.icon}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
       <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">

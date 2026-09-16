@@ -111,6 +111,9 @@ type Gesture =
       mode: 'resize'
       handle: ResizeHandle
       isText: boolean
+      isImage?: boolean
+      lockProportions?: boolean
+      aspectRatio?: number
       layerType?: LayerType
       sx: number
       sy: number
@@ -167,6 +170,24 @@ type Pinch =
 
 export default function Canvas() {
   const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing, artboardSnap, nudge } = useEditor()
+  const [nudgeIncrement, setNudgeIncrement] = useState<number>(1)
+  const nudgeIncrementRef = useRef<number>(1)
+  nudgeIncrementRef.current = nudgeIncrement
+  const [editingNudgeIncrement, setEditingNudgeIncrement] = useState<boolean>(false)
+  const [customNudgeInput, setCustomNudgeInput] = useState<string>('1')
+  const nudgePopoverRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!editingNudgeIncrement) return
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (nudgePopoverRef.current && !nudgePopoverRef.current.contains(e.target as Node)) {
+        setEditingNudgeIncrement(false)
+      }
+    }
+    window.addEventListener('pointerdown', handleClickOutside)
+    return () => window.removeEventListener('pointerdown', handleClickOutside)
+  }, [editingNudgeIncrement])
+
   const { ref, size } = useSize<HTMLDivElement>()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingComponentId, setEditingComponentId] = useState<string | null>(null)
@@ -209,6 +230,19 @@ export default function Canvas() {
   selHRef.current = selH
   const artboardSnapRef = useRef(artboardSnap)
   artboardSnapRef.current = artboardSnap
+  const tapTrackerRef = useRef<{
+    layerId: string
+    time: number
+    count: number
+    initialX?: number
+    initialW?: number
+    widenedInSequence?: boolean
+  }>({
+    layerId: '',
+    time: 0,
+    count: 0,
+  })
+  const lastGestureMovedRef = useRef(false)
 
   const getExcludeIds = useCallback((gId?: string, group?: { id: string }[]) => {
     const exclude = new Set<string>()
@@ -418,6 +452,7 @@ export default function Canvas() {
       }
 
       const tol = SIZE_SNAP_TOLERANCE_PX
+      const snapTol = Math.max(8, SNAP_TOLERANCE_PX / eff)
 
       if (g.group) {
         const excludeIds = getExcludeIds(g.id, g.group)
@@ -436,15 +471,27 @@ export default function Canvas() {
             artboardSnapRef.current ? candidates : [],
             tol,
             20,
+            artboardSnapRef.current ? preset.w : undefined,
+            artboardSnapRef.current ? preset.h : undefined,
           )
 
-          if (matchRes.widthMatch || matchRes.heightMatch) {
+          const xGuides: number[] = []
+          const yGuides: number[] = []
+          if (matchRes.snapXGuide != null) xGuides.push(matchRes.snapXGuide)
+          if (matchRes.snapYGuide != null) yGuides.push(matchRes.snapYGuide)
+
+          if (xGuides.length > 0 || yGuides.length > 0) {
+            setSnapGuides({ active: true, xGuides, yGuides })
+            setSizeMatch(null)
+          } else if (matchRes.widthMatch || matchRes.heightMatch) {
+            setSnapGuides(null)
             setSizeMatch({
               active: true,
               widthMatch: matchRes.widthMatch,
               heightMatch: matchRes.heightMatch,
             })
           } else {
+            setSnapGuides(null)
             setSizeMatch(null)
           }
 
@@ -479,7 +526,14 @@ export default function Canvas() {
           if (handle === 'r') {
             const minW = g.maxFgRight ? Math.max(20, g.maxFgRight - g.ox) : 20
             let clampedW = Math.max(minW, Math.round(g.ow + dx))
-            if (artboardSnapRef.current && candidates.length > 0) {
+            const rEdge = g.ox + clampedW
+            const xGuides: number[] = []
+
+            if (artboardSnapRef.current && Math.abs(rEdge - preset.w) <= snapTol) {
+              clampedW = Math.max(minW, preset.w - g.ox)
+              xGuides.push(preset.w)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && candidates.length > 0) {
               const sm = findSizeMatch(clampedW, g.oh, { x: g.ox, y: g.oy, w: clampedW, h: g.oh }, candidates, tol, true, false)
               if (sm.widthMatch) {
                 clampedW = Math.max(minW, sm.snappedW)
@@ -489,6 +543,12 @@ export default function Canvas() {
               }
             } else {
               setSizeMatch(null)
+            }
+
+            if (xGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides, yGuides: [] })
+            } else {
+              setSnapGuides(null)
             }
             const padDelta = clampedW - g.ow
 
@@ -511,7 +571,14 @@ export default function Canvas() {
             const maxLeft = g.minFgLeft != null ? g.minFgLeft : g.ox + g.ow - 20
             let clampedX = Math.min(maxLeft, g.ox + (g.ow - rawW))
             let clampedW = g.ow + (g.ox - clampedX)
-            if (artboardSnapRef.current && candidates.length > 0) {
+            const xGuides: number[] = []
+
+            if (artboardSnapRef.current && Math.abs(clampedX - 0) <= snapTol) {
+              clampedX = Math.min(maxLeft, 0)
+              clampedW = g.ow + (g.ox - clampedX)
+              xGuides.push(0)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && candidates.length > 0) {
               const sm = findSizeMatch(clampedW, g.oh, { x: clampedX, y: g.oy, w: clampedW, h: g.oh }, candidates, tol, true, false)
               if (sm.widthMatch) {
                 clampedW = sm.snappedW
@@ -523,6 +590,12 @@ export default function Canvas() {
               }
             } else {
               setSizeMatch(null)
+            }
+
+            if (xGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides, yGuides: [] })
+            } else {
+              setSnapGuides(null)
             }
             const padDelta = clampedW - g.ow
 
@@ -547,7 +620,14 @@ export default function Canvas() {
           } else if (handle === 'b') {
             const minH = g.maxFgBottom ? Math.max(20, g.maxFgBottom - g.oy) : 20
             let clampedH = Math.max(minH, Math.round(g.oh + dy))
-            if (artboardSnapRef.current && candidates.length > 0) {
+            const bEdge = g.oy + clampedH
+            const yGuides: number[] = []
+
+            if (artboardSnapRef.current && Math.abs(bEdge - preset.h) <= snapTol) {
+              clampedH = Math.max(minH, preset.h - g.oy)
+              yGuides.push(preset.h)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && candidates.length > 0) {
               const sm = findSizeMatch(g.ow, clampedH, { x: g.ox, y: g.oy, w: g.ow, h: clampedH }, candidates, tol, false, true)
               if (sm.heightMatch) {
                 clampedH = Math.max(minH, sm.snappedH)
@@ -557,6 +637,12 @@ export default function Canvas() {
               }
             } else {
               setSizeMatch(null)
+            }
+
+            if (yGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides: [], yGuides })
+            } else {
+              setSnapGuides(null)
             }
             const padDelta = clampedH - g.oh
 
@@ -579,7 +665,14 @@ export default function Canvas() {
             const maxTop = g.minFgTop != null ? g.minFgTop : g.oy + g.oh - 20
             let clampedY = Math.min(maxTop, g.oy + (g.oh - rawH))
             let clampedH = g.oh + (g.oy - clampedY)
-            if (artboardSnapRef.current && candidates.length > 0) {
+            const yGuides: number[] = []
+
+            if (artboardSnapRef.current && Math.abs(clampedY - 0) <= snapTol) {
+              clampedY = Math.min(maxTop, 0)
+              clampedH = g.oh + (g.oy - clampedY)
+              yGuides.push(0)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && candidates.length > 0) {
               const sm = findSizeMatch(g.ow, clampedH, { x: g.ox, y: clampedY, w: g.ow, h: clampedH }, candidates, tol, false, true)
               if (sm.heightMatch) {
                 clampedH = sm.snappedH
@@ -591,6 +684,12 @@ export default function Canvas() {
               }
             } else {
               setSizeMatch(null)
+            }
+
+            if (yGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides: [], yGuides })
+            } else {
+              setSnapGuides(null)
             }
             const padDelta = clampedH - g.oh
 
@@ -615,73 +714,194 @@ export default function Canvas() {
           }
         }
       } else if (isCorner) {
-        const excludeIds = getExcludeIds(g.id)
-        const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w, preset.h, true)
-        const matchRes = findCornerSizeMatch(
-          g.ow,
-          g.oh,
-          newW,
-          newH,
-          g.ox,
-          g.oy,
-          isLeft,
-          isTop,
-          artboardSnapRef.current ? candidates : [],
-          tol,
-          15,
-        )
+        if (g.isImage && !g.lockProportions) {
+          let finalW = newW
+          let finalH = newH
+          let finalX = isLeft ? g.ox + (g.ow - finalW) : g.ox
+          let finalY = isTop ? g.oy + (g.oh - finalH) : g.oy
 
-        if (matchRes.widthMatch || matchRes.heightMatch) {
-          setSizeMatch({
-            active: true,
-            widthMatch: matchRes.widthMatch,
-            heightMatch: matchRes.heightMatch,
+          const xGuides: number[] = []
+          const yGuides: number[] = []
+
+          if (artboardSnapRef.current) {
+            if (isLeft && Math.abs(finalX - 0) <= snapTol) {
+              finalX = 0
+              finalW = Math.max(15, g.ox + g.ow)
+              xGuides.push(0)
+            } else if (!isLeft && Math.abs(finalX + finalW - preset.w) <= snapTol) {
+              finalW = Math.max(15, preset.w - finalX)
+              xGuides.push(preset.w)
+            }
+            if (isTop && Math.abs(finalY - 0) <= snapTol) {
+              finalY = 0
+              finalH = Math.max(15, g.oy + g.oh)
+              yGuides.push(0)
+            } else if (!isTop && Math.abs(finalY + finalH - preset.h) <= snapTol) {
+              finalH = Math.max(15, preset.h - finalY)
+              yGuides.push(preset.h)
+            }
+          }
+
+          if (xGuides.length > 0 || yGuides.length > 0) {
+            setSnapGuides({ active: true, xGuides, yGuides })
+          } else {
+            setSnapGuides(null)
+          }
+          setSizeMatch(null)
+
+          updateLayer(g.id, {
+            x: Math.round(finalX),
+            y: Math.round(finalY),
+            w: Math.round(finalW),
+            h: Math.round(finalH),
           })
         } else {
-          setSizeMatch(null)
-        }
+          const excludeIds = getExcludeIds(g.id)
+          const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w, preset.h, true)
+          const matchRes = findCornerSizeMatch(
+            g.ow,
+            g.oh,
+            newW,
+            newH,
+            g.ox,
+            g.oy,
+            isLeft,
+            isTop,
+            artboardSnapRef.current ? candidates : [],
+            tol,
+            15,
+            artboardSnapRef.current ? preset.w : undefined,
+            artboardSnapRef.current ? preset.h : undefined,
+          )
 
-        if (g.isText) {
-          const fontSize = Math.max(6, Math.round(g.ofs * matchRes.factor))
-          const patch: Partial<Layer> = {
-            fontSize,
-            x: matchRes.x,
-            y: matchRes.y,
+          const xGuides: number[] = []
+          const yGuides: number[] = []
+          if (matchRes.snapXGuide != null) xGuides.push(matchRes.snapXGuide)
+          if (matchRes.snapYGuide != null) yGuides.push(matchRes.snapYGuide)
+
+          if (xGuides.length > 0 || yGuides.length > 0) {
+            setSnapGuides({ active: true, xGuides, yGuides })
+            setSizeMatch(null)
+          } else if (matchRes.widthMatch || matchRes.heightMatch) {
+            setSnapGuides(null)
+            setSizeMatch({
+              active: true,
+              widthMatch: matchRes.widthMatch,
+              heightMatch: matchRes.heightMatch,
+            })
+          } else {
+            setSnapGuides(null)
+            setSizeMatch(null)
           }
-          if (g.origPadTop) patch.paddingTop = Math.round(g.origPadTop * matchRes.factor)
-          if (g.origPadRight) patch.paddingRight = Math.round(g.origPadRight * matchRes.factor)
-          if (g.origPadBottom) patch.paddingBottom = Math.round(g.origPadBottom * matchRes.factor)
-          if (g.origPadLeft) patch.paddingLeft = Math.round(g.origPadLeft * matchRes.factor)
-          updateLayer(g.id, patch)
-        } else {
-          updateLayer(g.id, { x: matchRes.x, y: matchRes.y, w: matchRes.w, h: matchRes.h })
+
+          if (g.isText) {
+            const fontSize = Math.max(6, Math.round(g.ofs * matchRes.factor))
+            const patch: Partial<Layer> = {
+              fontSize,
+              x: matchRes.x,
+              y: matchRes.y,
+            }
+            if (g.origPadTop) patch.paddingTop = Math.round(g.origPadTop * matchRes.factor)
+            if (g.origPadRight) patch.paddingRight = Math.round(g.origPadRight * matchRes.factor)
+            if (g.origPadBottom) patch.paddingBottom = Math.round(g.origPadBottom * matchRes.factor)
+            if (g.origPadLeft) patch.paddingLeft = Math.round(g.origPadLeft * matchRes.factor)
+            updateLayer(g.id, patch)
+          } else {
+            updateLayer(g.id, { x: matchRes.x, y: matchRes.y, w: matchRes.w, h: matchRes.h })
+          }
         }
       } else {
-        // Single element middle drag handle: increase padding on that side without uniform scale
-        if (g.isText || g.layerType === 'image' || g.layerType === 'sticker') {
+        // Single element middle drag handle
+        if (g.isText) {
           if (handle === 'r') {
-            const newPadRight = Math.max(0, Math.round(g.origPadRight + dx))
+            const rawPadRight = Math.max(0, Math.round(g.origPadRight + dx))
+            let newPadRight = rawPadRight
+            const rEdge = g.ox + g.ow + (rawPadRight - g.origPadRight)
+            const xGuides: number[] = []
+            if (artboardSnapRef.current && Math.abs(rEdge - preset.w) <= snapTol) {
+              newPadRight = Math.max(0, preset.w - g.ox - g.ow + g.origPadRight)
+              xGuides.push(preset.w)
+            }
+            if (xGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides, yGuides: [] })
+            } else {
+              setSnapGuides(null)
+            }
+            setSizeMatch(null)
             updateLayer(g.id, { x: Math.round(g.ox), w: Math.round(g.ow), paddingRight: newPadRight })
           } else if (handle === 'l') {
-            const newPadLeft = Math.max(0, Math.round(g.origPadLeft - dx))
-            const deltaPad = newPadLeft - g.origPadLeft
-            updateLayer(g.id, { x: Math.round(g.ox - deltaPad), w: Math.round(g.ow), paddingLeft: newPadLeft })
+            const rawPadLeft = Math.max(0, Math.round(g.origPadLeft - dx))
+            let newPadLeft = rawPadLeft
+            const deltaPad = rawPadLeft - g.origPadLeft
+            const candX = g.ox - deltaPad
+            const xGuides: number[] = []
+            if (artboardSnapRef.current && Math.abs(candX - 0) <= snapTol) {
+              newPadLeft = Math.max(0, g.origPadLeft + g.ox)
+              xGuides.push(0)
+            }
+            const finalDelta = newPadLeft - g.origPadLeft
+            if (xGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides, yGuides: [] })
+            } else {
+              setSnapGuides(null)
+            }
+            setSizeMatch(null)
+            updateLayer(g.id, { x: Math.round(g.ox - finalDelta), w: Math.round(g.ow), paddingLeft: newPadLeft })
           } else if (handle === 'b') {
-            const newPadBottom = Math.max(0, Math.round(g.origPadBottom + dy))
+            const rawPadBottom = Math.max(0, Math.round(g.origPadBottom + dy))
+            let newPadBottom = rawPadBottom
+            const bEdge = g.oy + g.oh + (rawPadBottom - g.origPadBottom)
+            const yGuides: number[] = []
+            if (artboardSnapRef.current && Math.abs(bEdge - preset.h) <= snapTol) {
+              newPadBottom = Math.max(0, preset.h - g.oy - g.oh + g.origPadBottom)
+              yGuides.push(preset.h)
+            }
+            if (yGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides: [], yGuides })
+            } else {
+              setSnapGuides(null)
+            }
+            setSizeMatch(null)
             updateLayer(g.id, { y: Math.round(g.oy), h: Math.round(g.oh), paddingBottom: newPadBottom })
           } else if (handle === 't') {
-            const newPadTop = Math.max(0, Math.round(g.origPadTop - dy))
-            const deltaPad = newPadTop - g.origPadTop
-            updateLayer(g.id, { y: Math.round(g.oy - deltaPad), h: Math.round(g.oh), paddingTop: newPadTop })
+            const rawPadTop = Math.max(0, Math.round(g.origPadTop - dy))
+            let newPadTop = rawPadTop
+            const deltaPad = rawPadTop - g.origPadTop
+            const candY = g.oy - deltaPad
+            const yGuides: number[] = []
+            if (artboardSnapRef.current && Math.abs(candY - 0) <= snapTol) {
+              newPadTop = Math.max(0, g.origPadTop + g.oy)
+              yGuides.push(0)
+            }
+            const finalDelta = newPadTop - g.origPadTop
+            if (yGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides: [], yGuides })
+            } else {
+              setSnapGuides(null)
+            }
+            setSizeMatch(null)
+            updateLayer(g.id, { y: Math.round(g.oy - finalDelta), h: Math.round(g.oh), paddingTop: newPadTop })
           }
-        } else if (g.layerType === 'shape') {
+        } else {
+          // Graphic elements (shape, image, sticker, etc.)
           const excludeIds = getExcludeIds(g.id)
           const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w, preset.h, true)
 
           if (handle === 'r') {
             const rawW = Math.max(15, Math.round(g.ow + dx))
             let finalW = rawW
-            if (artboardSnapRef.current && candidates.length > 0) {
+            const rEdge = g.ox + rawW
+            const xGuides: number[] = []
+
+            if (artboardSnapRef.current && Math.abs(rEdge - preset.w) <= snapTol) {
+              finalW = Math.max(15, preset.w - g.ox)
+              xGuides.push(preset.w)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && Math.abs(rEdge - 0) <= snapTol) {
+              finalW = Math.max(15, -g.ox)
+              xGuides.push(0)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && candidates.length > 0) {
               const sm = findSizeMatch(rawW, g.oh, { x: g.ox, y: g.oy, w: rawW, h: g.oh }, candidates, tol, true, false)
               if (sm.widthMatch) {
                 finalW = sm.snappedW
@@ -692,15 +912,41 @@ export default function Canvas() {
             } else {
               setSizeMatch(null)
             }
-            updateLayer(g.id, { w: finalW })
+
+            if (xGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides, yGuides: [] })
+            } else {
+              setSnapGuides(null)
+            }
+            if (g.isImage && g.lockProportions && g.aspectRatio) {
+              const finalH = Math.max(15, Math.round(finalW / g.aspectRatio))
+              const finalY = Math.round(g.oy + (g.oh - finalH) / 2)
+              updateLayer(g.id, { w: finalW, h: finalH, y: finalY })
+            } else {
+              updateLayer(g.id, { w: finalW })
+            }
           } else if (handle === 'l') {
             const rawW = Math.max(15, Math.round(g.ow - dx))
             let finalW = rawW
             const candX = g.ox + (g.ow - rawW)
-            if (artboardSnapRef.current && candidates.length > 0) {
+            let finalX = candX
+            const xGuides: number[] = []
+
+            if (artboardSnapRef.current && Math.abs(candX - 0) <= snapTol) {
+              finalX = 0
+              finalW = Math.max(15, g.ox + g.ow)
+              xGuides.push(0)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && Math.abs(candX - preset.w) <= snapTol) {
+              finalX = preset.w
+              finalW = Math.max(15, g.ox + g.ow - preset.w)
+              xGuides.push(preset.w)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && candidates.length > 0) {
               const sm = findSizeMatch(rawW, g.oh, { x: candX, y: g.oy, w: rawW, h: g.oh }, candidates, tol, true, false)
               if (sm.widthMatch) {
                 finalW = sm.snappedW
+                finalX = g.ox + (g.ow - finalW)
                 setSizeMatch({ active: true, widthMatch: sm.widthMatch })
               } else {
                 setSizeMatch(null)
@@ -708,12 +954,34 @@ export default function Canvas() {
             } else {
               setSizeMatch(null)
             }
-            const x = g.ox + (g.ow - finalW)
-            updateLayer(g.id, { x: Math.round(x), w: finalW })
+
+            if (xGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides, yGuides: [] })
+            } else {
+              setSnapGuides(null)
+            }
+            if (g.isImage && g.lockProportions && g.aspectRatio) {
+              const finalH = Math.max(15, Math.round(finalW / g.aspectRatio))
+              const finalY = Math.round(g.oy + (g.oh - finalH) / 2)
+              updateLayer(g.id, { x: Math.round(finalX), w: finalW, h: finalH, y: finalY })
+            } else {
+              updateLayer(g.id, { x: Math.round(finalX), w: finalW })
+            }
           } else if (handle === 'b') {
             const rawH = Math.max(15, Math.round(g.oh + dy))
             let finalH = rawH
-            if (artboardSnapRef.current && candidates.length > 0) {
+            const bEdge = g.oy + rawH
+            const yGuides: number[] = []
+
+            if (artboardSnapRef.current && Math.abs(bEdge - preset.h) <= snapTol) {
+              finalH = Math.max(15, preset.h - g.oy)
+              yGuides.push(preset.h)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && Math.abs(bEdge - 0) <= snapTol) {
+              finalH = Math.max(15, -g.oy)
+              yGuides.push(0)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && candidates.length > 0) {
               const sm = findSizeMatch(g.ow, rawH, { x: g.ox, y: g.oy, w: g.ow, h: rawH }, candidates, tol, false, true)
               if (sm.heightMatch) {
                 finalH = sm.snappedH
@@ -724,15 +992,41 @@ export default function Canvas() {
             } else {
               setSizeMatch(null)
             }
-            updateLayer(g.id, { h: finalH })
+
+            if (yGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides: [], yGuides })
+            } else {
+              setSnapGuides(null)
+            }
+            if (g.isImage && g.lockProportions && g.aspectRatio) {
+              const finalW = Math.max(15, Math.round(finalH * g.aspectRatio))
+              const finalX = Math.round(g.ox + (g.ow - finalW) / 2)
+              updateLayer(g.id, { h: finalH, w: finalW, x: finalX })
+            } else {
+              updateLayer(g.id, { h: finalH })
+            }
           } else if (handle === 't') {
             const rawH = Math.max(15, Math.round(g.oh - dy))
             let finalH = rawH
             const candY = g.oy + (g.oh - rawH)
-            if (artboardSnapRef.current && candidates.length > 0) {
+            let finalY = candY
+            const yGuides: number[] = []
+
+            if (artboardSnapRef.current && Math.abs(candY - 0) <= snapTol) {
+              finalY = 0
+              finalH = Math.max(15, g.oy + g.oh)
+              yGuides.push(0)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && Math.abs(candY - preset.h) <= snapTol) {
+              finalY = preset.h
+              finalH = Math.max(15, g.oy + g.oh - preset.h)
+              yGuides.push(preset.h)
+              setSizeMatch(null)
+            } else if (artboardSnapRef.current && candidates.length > 0) {
               const sm = findSizeMatch(g.ow, rawH, { x: g.ox, y: candY, w: g.ow, h: rawH }, candidates, tol, false, true)
               if (sm.heightMatch) {
                 finalH = sm.snappedH
+                finalY = g.oy + (g.oh - finalH)
                 setSizeMatch({ active: true, heightMatch: sm.heightMatch })
               } else {
                 setSizeMatch(null)
@@ -740,8 +1034,19 @@ export default function Canvas() {
             } else {
               setSizeMatch(null)
             }
-            const y = g.oy + (g.oh - finalH)
-            updateLayer(g.id, { y: Math.round(y), h: finalH })
+
+            if (yGuides.length > 0) {
+              setSnapGuides({ active: true, xGuides: [], yGuides })
+            } else {
+              setSnapGuides(null)
+            }
+            if (g.isImage && g.lockProportions && g.aspectRatio) {
+              const finalW = Math.max(15, Math.round(finalH * g.aspectRatio))
+              const finalX = Math.round(g.ox + (g.ow - finalW) / 2)
+              updateLayer(g.id, { y: Math.round(finalY), h: finalH, w: finalW, x: finalX })
+            } else {
+              updateLayer(g.id, { y: Math.round(finalY), h: finalH })
+            }
           }
         }
       }
@@ -752,6 +1057,11 @@ export default function Canvas() {
         longPress.current = null
       }
       const g = gesture.current
+      const moved = g?.mode === 'move' ? g.moved : false
+      lastGestureMovedRef.current = moved
+      if (moved) {
+        tapTrackerRef.current = { layerId: '', time: 0, count: 0 }
+      }
       if (g?.mode === 'move' && !g.moved && g.tapAddId) {
         select(g.tapAddId, true)
       } else if (g?.mode === 'move' && !g.moved && g.tapToggleId) {
@@ -793,6 +1103,9 @@ export default function Canvas() {
 
   const handleNudge = useCallback(
     (dx: number, dy: number) => {
+      const step = nudgeIncrementRef.current || 1
+      const actualDx = dx * step
+      const actualDy = dy * step
       const measured: Record<string, { x: number; y: number; w: number; h: number }> = {}
       for (const [id, node] of layerRefs.current.entries()) {
         if (node) {
@@ -800,12 +1113,12 @@ export default function Canvas() {
           const isCentered = l?.type === 'text' && l.align === 'center' && l.x === 0 && l.w === preset.w
           const w = node.offsetWidth
           const h = node.offsetHeight
-          const x = isCentered ? (preset.w - w) / 2 : node.offsetLeft
-          const y = node.offsetTop
+          const x = isCentered ? (preset.w - w) / 2 : (l ? l.x : node.offsetLeft)
+          const y = l ? l.y : node.offsetTop
           measured[id] = { x, y, w, h }
         }
       }
-      nudge(dx, dy, measured)
+      nudge(actualDx, actualDy, measured)
     },
     [nudge, preset.w],
   )
@@ -1218,7 +1531,7 @@ export default function Canvas() {
         const pH = (primary.type === 'text' && pNode ? pNode.offsetHeight : pNode?.offsetHeight) || primary.h
         const pX = (primary.type === 'text' && primary.align === 'center' && primary.x === 0 && primary.w === preset.w && pNode)
           ? (preset.w - pW) / 2
-          : (pNode?.offsetLeft ?? primary.x)
+          : primary.x
         const group = selectedLayers.length > 1
           ? selectedLayers.map((item) => {
               const itemNode = layerRefs.current.get(item.id)
@@ -1226,7 +1539,7 @@ export default function Canvas() {
               const itemH = (item.type === 'text' && itemNode ? itemNode.offsetHeight : itemNode?.offsetHeight) || item.h
               const itemX = (item.type === 'text' && item.align === 'center' && item.x === 0 && item.w === preset.w && itemNode)
                 ? (preset.w - itemW) / 2
-                : (itemNode?.offsetLeft ?? item.x)
+                : item.x
               return { id: item.id, x: itemX, y: item.y, w: itemW, h: itemH }
             })
           : undefined
@@ -1306,7 +1619,7 @@ export default function Canvas() {
     const node = layerRefs.current.get(target.id)
     const currentX = (target.type === 'text' && target.align === 'center' && target.x === 0 && target.w === preset.w && node)
       ? (preset.w - node.offsetWidth) / 2
-      : (node?.offsetLeft ?? target.x)
+      : target.x
     const currentW = (target.type === 'text' && node ? node.offsetWidth : node?.offsetWidth) || target.w
     const currentH = (target.type === 'text' && node ? node.offsetHeight : node?.offsetHeight) || target.h
 
@@ -1317,7 +1630,7 @@ export default function Canvas() {
           const itemH = (item.type === 'text' && itemNode ? itemNode.offsetHeight : itemNode?.offsetHeight) || item.h
           const itemX = (item.type === 'text' && item.align === 'center' && item.x === 0 && item.w === preset.w && itemNode)
             ? (preset.w - itemW) / 2
-            : (itemNode?.offsetLeft ?? item.x)
+            : item.x
           return { id: item.id, x: itemX, y: item.y, w: itemW, h: itemH }
         })
       : undefined
@@ -1344,6 +1657,98 @@ export default function Canvas() {
     }
   }, [selectedId, project.layers])
 
+  const handleDoubleTap = (l: Layer) => {
+    if (l.locked) return
+    if (l.type === 'image') {
+      tapTrackerRef.current.widenedInSequence = true
+      updateLayer(l.id, { x: 0, w: preset.w })
+      select(l.id)
+    } else if (l.type === 'text') {
+      setEditingId(l.id)
+    } else {
+      select(l.id)
+    }
+  }
+
+  const handleTripleTap = (l: Layer, info?: { prevX?: number; prevW?: number; widened?: boolean }) => {
+    if (l.locked) return
+    if (l.type === 'text') {
+      setEditingId(null)
+    }
+    if (l.type === 'group') {
+      const scaleY = preset.h / Math.max(1, l.h)
+      const desc = getDescendantLayers(l.id, project.layers)
+      for (const child of desc) {
+        const relY = child.y - l.y
+        updateLayer(child.id, {
+          y: Math.round(relY * scaleY),
+          h: Math.max(10, Math.round(child.h * scaleY)),
+        })
+      }
+      updateLayer(l.id, { y: 0, h: preset.h })
+      select(l.id)
+      return
+    }
+    const patch: Partial<Layer> = { y: 0, h: preset.h }
+    if (l.type === 'image' && info?.widened && info?.prevX !== undefined && info?.prevW !== undefined) {
+      patch.x = info.prevX
+      patch.w = info.prevW
+    }
+    updateLayer(l.id, patch)
+    select(l.id)
+  }
+
+  const handleLayerClick = (e: React.MouseEvent, l: Layer) => {
+    e.stopPropagation()
+    if (l.locked) return
+    if (lastGestureMovedRef.current) {
+      lastGestureMovedRef.current = false
+      return
+    }
+
+    const now = Date.now()
+    const tracker = tapTrackerRef.current
+    const isSameLayer = tracker.layerId === l.id
+    const isWithinTime = now - tracker.time <= 400
+
+    let count = 1
+    if (isSameLayer && isWithinTime) {
+      count = tracker.count + 1
+    }
+    if (e.detail && e.detail > count) {
+      count = e.detail
+    }
+
+    if (count === 1) {
+      tapTrackerRef.current = {
+        layerId: l.id,
+        time: now,
+        count: 1,
+        initialX: l.x,
+        initialW: l.w,
+        widenedInSequence: false,
+      }
+    } else if (count === 2) {
+      tapTrackerRef.current = {
+        ...tracker,
+        layerId: l.id,
+        time: now,
+        count: 2,
+      }
+      handleDoubleTap(l)
+    } else if (count >= 3) {
+      const prevX = tracker.initialX ?? l.x
+      const prevW = tracker.initialW ?? l.w
+      const widened = tracker.widenedInSequence ?? false
+      tapTrackerRef.current = {
+        layerId: '',
+        time: 0,
+        count: 0,
+      }
+      handleTripleTap(l, { prevX, prevW, widened })
+    }
+  }
+
   const startResize = (e: React.PointerEvent, l: Layer, handle: ResizeHandle, boxW: number, boxH: number, boundsLeft?: number, boundsTop?: number, group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number }[]) => {
     if (pinching.current) return
     e.stopPropagation()
@@ -1354,7 +1759,7 @@ export default function Canvas() {
     const currentH = l.type === 'text' && node ? node.offsetHeight : boxH
     const currentX = (l.type === 'text' && l.align === 'center' && l.x === 0 && l.w === preset.w && node)
       ? (preset.w - currentW) / 2
-      : (node?.offsetLeft ?? l.x)
+      : l.x
     const originX = group ? (boundsLeft ?? currentX) : currentX
     const originY = group ? (boundsTop ?? l.y) : l.y
     const originW = group ? boxW : currentW
@@ -1381,11 +1786,18 @@ export default function Canvas() {
       }
     }
 
+    const isImage = l.type === 'image'
+    const lockProportions = isImage ? Boolean(l.lockProportions) : false
+    const aspectRatio = originH > 0 ? originW / originH : 1
+
     gesture.current = {
       id: l.id,
       mode: 'resize',
       handle,
       isText: l.type === 'text',
+      isImage,
+      lockProportions,
+      aspectRatio,
       layerType: l.type,
       sx: e.clientX,
       sy: e.clientY,
@@ -1571,7 +1983,7 @@ export default function Canvas() {
           const pH = (primary.type === 'text' && pNode ? pNode.offsetHeight : pNode?.offsetHeight) || primary.h
           const pX = (primary.type === 'text' && primary.align === 'center' && primary.x === 0 && primary.w === preset.w && pNode)
             ? (preset.w - pW) / 2
-            : (pNode?.offsetLeft ?? primary.x)
+            : primary.x
           const group = selectedLayers.length > 1
             ? selectedLayers.map((item) => {
                 const itemNode = layerRefs.current.get(item.id)
@@ -1579,7 +1991,7 @@ export default function Canvas() {
                 const itemH = (item.type === 'text' && itemNode ? itemNode.offsetHeight : itemNode?.offsetHeight) || item.h
                 const itemX = (item.type === 'text' && item.align === 'center' && item.x === 0 && item.w === preset.w && itemNode)
                   ? (preset.w - itemW) / 2
-                  : (itemNode?.offsetLeft ?? item.x)
+                  : item.x
                 return { id: item.id, x: itemX, y: item.y, w: itemW, h: itemH }
               })
             : undefined
@@ -1870,8 +2282,14 @@ export default function Canvas() {
                     gesture.current = null
                   }
                 }}
-          onDoubleClick={(e) => { e.stopPropagation(); if (l.type === 'text') setEditingId(l.id); else select(l.id) }}
+                onClick={(e) => handleLayerClick(e, l)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation()
+                  if (l.locked) return
+                  handleDoubleTap(l)
+                }}
                 data-testid={`layer-${l.id}`}
+                data-layer-id={l.id}
                 style={{
                   position: 'absolute',
                   left: l.type === 'text' && l.align === 'center' && l.x === 0 && l.w === preset.w && !l.paddingLeft && !l.paddingRight && layerRefs.current.get(l.id)
@@ -1879,7 +2297,7 @@ export default function Canvas() {
                     : l.x,
                   top: l.y,
                   width: l.type === 'text' ? 'max-content' : l.w,
-                  height: l.type === 'text' ? 'auto' : l.h,
+                  height: l.type === 'text' && l.h !== preset.h ? 'auto' : l.h,
                   fontSize: l.type === 'text' ? l.fontSize : undefined,
                   lineHeight: l.type === 'text' ? 0.8 : undefined,
                   paddingTop: l.paddingTop ? `${l.paddingTop}px` : undefined,
@@ -1934,14 +2352,17 @@ export default function Canvas() {
             const isGroup = selected.length > 1 || multiSelectMode || sel.type === 'group'
             const measured = (layer: Layer) => {
               const node = layerRefs.current.get(layer.id)
-              const posX = layer.type === 'text' && layer.align === 'center' && layer.x === 0 && layer.w === preset.w && node
-                ? (preset.w - node.offsetWidth) / 2
-                : (node?.offsetLeft ?? layer.x)
+              const isText = layer.type === 'text'
+              const textW = (isText && node ? node.offsetWidth : 0) || layer.w
+              const posX = isText && layer.align === 'center' && layer.x === 0 && layer.w === preset.w
+                ? (preset.w - textW) / 2
+                : layer.x
+              const textH = (isText && node ? node.offsetHeight : 0) || (isText && layer.id === selectedId ? selH : 0) || layer.h
               return {
                 x: posX,
-                y: node?.offsetTop ?? layer.y,
-                w: (layer.type === 'text' && node ? node.offsetWidth : node?.offsetWidth) || layer.w,
-                h: (layer.type === 'text' && node ? node.offsetHeight : node?.offsetHeight) || (layer.type === 'text' ? (layer.id === selectedId ? selH : 0) || layer.h : layer.h),
+                y: layer.y,
+                w: isText ? textW : layer.w,
+                h: isText ? textH : layer.h,
               }
             }
             let bounds = selected.reduce(
@@ -2011,6 +2432,12 @@ export default function Canvas() {
                     onPointerDown={(e) => {
                       e.stopPropagation()
                       startMove(e, sel)
+                    }}
+                    onClick={(e) => handleLayerClick(e, sel)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation()
+                      if (sel.locked) return
+                      handleDoubleTap(sel)
                     }}
                     style={{
                       position: 'absolute',
@@ -2530,70 +2957,167 @@ export default function Canvas() {
       )}
 
 
-      {/* Floating nudge buttons in bottom-left corner */}
+      {/* Floating nudge buttons in bottom-left corner with increment control */}
       <div
-        data-testid="nudge-controls"
-        id="nudge-controls"
-        className="absolute bottom-3 left-3 z-40 flex items-center gap-1 rounded-full bg-black/60 px-2 py-1.5 text-xs font-semibold text-white backdrop-blur-md select-none border border-white/10 shadow-lg"
+        className="absolute bottom-3 left-3 z-40 flex items-center select-none"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          data-testid="nudge-left"
-          id="nudge-left"
-          data-action="nudge-left"
-          data-direction="left"
-          type="button"
-          aria-label="Nudge left"
-          title="Nudge left (1px)"
-          onClick={() => handleNudge(-1, 0)}
-          className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+        <div
+          data-testid="nudge-controls"
+          id="nudge-controls"
+          className="flex h-9 items-center gap-1 rounded-full bg-black/60 px-2 py-1.5 text-xs font-semibold text-white backdrop-blur-md border border-white/10 shadow-lg"
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          <span className="sr-only">Nudge left</span>
-        </button>
-        <button
-          data-testid="nudge-right"
-          id="nudge-right"
-          data-action="nudge-right"
-          data-direction="right"
-          type="button"
-          aria-label="Nudge right"
-          title="Nudge right (1px)"
-          onClick={() => handleNudge(1, 0)}
-          className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
-        >
-          <ArrowRight className="h-3.5 w-3.5" />
-          <span className="sr-only">Nudge right</span>
-        </button>
-        <button
-          data-testid="nudge-up"
-          id="nudge-up"
-          data-action="nudge-up"
-          data-direction="up"
-          type="button"
-          aria-label="Nudge up"
-          title="Nudge up (1px)"
-          onClick={() => handleNudge(0, -1)}
-          className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
-        >
-          <ArrowUp className="h-3.5 w-3.5" />
-          <span className="sr-only">Nudge up</span>
-        </button>
-        <button
-          data-testid="nudge-down"
-          id="nudge-down"
-          data-action="nudge-down"
-          data-direction="down"
-          type="button"
-          aria-label="Nudge down"
-          title="Nudge down (1px)"
-          onClick={() => handleNudge(0, 1)}
-          className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
-        >
-          <ArrowDown className="h-3.5 w-3.5" />
-          <span className="sr-only">Nudge down</span>
-        </button>
+          <button
+            data-testid="nudge-left"
+            id="nudge-left"
+            data-action="nudge-left"
+            data-direction="left"
+            type="button"
+            aria-label={`Nudge left (${nudgeIncrement}px)`}
+            title={`Nudge left (${nudgeIncrement}px)`}
+            onClick={() => handleNudge(-1, 0)}
+            className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            <span className="sr-only">Nudge left</span>
+          </button>
+          <button
+            data-testid="nudge-right"
+            id="nudge-right"
+            data-action="nudge-right"
+            data-direction="right"
+            type="button"
+            aria-label={`Nudge right (${nudgeIncrement}px)`}
+            title={`Nudge right (${nudgeIncrement}px)`}
+            onClick={() => handleNudge(1, 0)}
+            className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+          >
+            <ArrowRight className="h-3.5 w-3.5" />
+            <span className="sr-only">Nudge right</span>
+          </button>
+          <button
+            data-testid="nudge-up"
+            id="nudge-up"
+            data-action="nudge-up"
+            data-direction="up"
+            type="button"
+            aria-label={`Nudge up (${nudgeIncrement}px)`}
+            title={`Nudge up (${nudgeIncrement}px)`}
+            onClick={() => handleNudge(0, -1)}
+            className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+          >
+            <ArrowUp className="h-3.5 w-3.5" />
+            <span className="sr-only">Nudge up</span>
+          </button>
+          <button
+            data-testid="nudge-down"
+            id="nudge-down"
+            data-action="nudge-down"
+            data-direction="down"
+            type="button"
+            aria-label={`Nudge down (${nudgeIncrement}px)`}
+            title={`Nudge down (${nudgeIncrement}px)`}
+            onClick={() => handleNudge(0, 1)}
+            className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+          >
+            <ArrowDown className="h-3.5 w-3.5" />
+            <span className="sr-only">Nudge down</span>
+          </button>
+        </div>
+
+        {/* Round button in the same height as the nudge panel to change nudge increment */}
+        <div ref={nudgePopoverRef} className="relative flex items-center">
+          <button
+            data-testid="nudge-increment-btn"
+            id="nudge-increment-btn"
+            type="button"
+            aria-label={`Change nudge increment (currently ${nudgeIncrement}px)`}
+            title={`Nudge increment: ${nudgeIncrement}px (tap to change)`}
+            onClick={() => {
+              setCustomNudgeInput(String(nudgeIncrement))
+              setEditingNudgeIncrement((prev) => !prev)
+            }}
+            className="flex h-9 min-w-[36px] px-2 items-center justify-center rounded-full bg-black/60 text-[11px] font-semibold text-white backdrop-blur-md border border-white/10 shadow-lg hover:bg-white/20 hover:text-white active:scale-90 transition-all focus:outline-none tabular-nums whitespace-nowrap"
+          >
+            {nudgeIncrement}px
+          </button>
+
+          {editingNudgeIncrement && (
+            <div
+              data-testid="nudge-increment-popover"
+              id="nudge-increment-popover"
+              className="absolute bottom-full left-0 mb-2 flex flex-col gap-1.5 rounded-2xl border border-white/10 bg-black/85 p-2.5 shadow-2xl backdrop-blur-lg text-white z-50 min-w-[140px]"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-[10px] font-medium text-white/60 px-1 uppercase tracking-wider">
+                Nudge Step
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {[1, 5, 10, 20].map((step) => (
+                  <button
+                    key={step}
+                    type="button"
+                    data-testid={`nudge-preset-${step}`}
+                    onClick={() => {
+                      setNudgeIncrement(step)
+                      setCustomNudgeInput(String(step))
+                      setEditingNudgeIncrement(false)
+                    }}
+                    className={`h-7 rounded-lg text-xs font-semibold transition-all ${
+                      nudgeIncrement === step
+                        ? 'bg-white text-black shadow'
+                        : 'bg-white/10 text-white/90 hover:bg-white/20 hover:text-white'
+                    }`}
+                  >
+                    {step}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5 pt-1 border-t border-white/10">
+                <input
+                  data-testid="nudge-custom-input"
+                  id="nudge-custom-input"
+                  type="number"
+                  min="1"
+                  max="500"
+                  step="1"
+                  value={customNudgeInput}
+                  onChange={(e) => setCustomNudgeInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const val = parseInt(customNudgeInput, 10)
+                      if (!isNaN(val) && val > 0) {
+                        setNudgeIncrement(val)
+                      }
+                      setEditingNudgeIncrement(false)
+                    } else if (e.key === 'Escape') {
+                      setEditingNudgeIncrement(false)
+                    }
+                  }}
+                  className="h-7 w-16 rounded-lg border border-white/20 bg-white/10 px-2 text-xs font-medium text-white placeholder-white/40 focus:border-white/50 focus:outline-none tabular-nums"
+                  placeholder="px"
+                />
+                <button
+                  type="button"
+                  data-testid="nudge-set-btn"
+                  id="nudge-set-btn"
+                  onClick={() => {
+                    const val = parseInt(customNudgeInput, 10)
+                    if (!isNaN(val) && val > 0) {
+                      setNudgeIncrement(val)
+                    }
+                    setEditingNudgeIncrement(false)
+                  }}
+                  className="flex-1 h-7 rounded-lg bg-white/20 hover:bg-white/30 text-xs font-medium text-white transition-colors flex items-center justify-center"
+                >
+                  Set
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {view.scale !== 1 && (

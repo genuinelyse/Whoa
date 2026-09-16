@@ -41,6 +41,7 @@ export interface Layer {
   // image / sticker
   src?: string
   emoji?: string
+  lockProportions?: boolean
   // group / component hierarchy
   groupId?: string
   isComponent?: boolean

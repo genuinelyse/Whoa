@@ -168,11 +168,13 @@ export interface CornerMatchResult {
   y: number
   widthMatch?: SizeMatchDimension
   heightMatch?: SizeMatchDimension
+  snapXGuide?: number
+  snapYGuide?: number
 }
 
 /**
  * Calculates uniform corner scale matching for elements, groups, and text when dragging corner handles.
- * Uses smooth least-squares diagonal projection and precise tolerance matching identical to pinch-resize.
+ * Uses smooth least-squares diagonal projection, artboard edge snapping, and size matching across candidates.
  */
 export function findCornerSizeMatch(
   ow: number,
@@ -186,6 +188,8 @@ export function findCornerSizeMatch(
   candidates: TargetBox[],
   tolerance: number,
   minSize = 15,
+  artW?: number,
+  artH?: number,
 ): CornerMatchResult {
   if (ow <= 0 || oh <= 0) {
     return { factor: 1, w: Math.max(minSize, ow), h: Math.max(minSize, oh), x: ox, y: oy }
@@ -197,9 +201,68 @@ export function findCornerSizeMatch(
   const ratio = 1 + (deltaW * ow + deltaH * oh) / (ow * ow + oh * oh)
   const clampedRatio = Math.max(minSize / Math.min(ow, oh), ratio)
 
-  // Unsnapped proportional size matching pinch-resize
+  // Unsnapped proportional size matching
   const rawW = Math.max(minSize, Math.round(ow * clampedRatio))
   const rawH = Math.max(minSize, Math.round(oh * clampedRatio))
+
+  // 1. Artboard edge snapping for corner handles
+  let artboardFactor: number | null = null
+  let snapXGuide: number | undefined = undefined
+  let snapYGuide: number | undefined = undefined
+
+  if (artW != null && artW > 0 && artH != null && artH > 0) {
+    const edgeX = isLeft ? ox + (ow - rawW) : ox + rawW
+    const edgeY = isTop ? oy + (oh - rawH) : oy + rawH
+
+    const targetX = isLeft ? 0 : artW
+    const targetY = isTop ? 0 : artH
+
+    const distX = Math.abs(edgeX - targetX)
+    const distY = Math.abs(edgeY - targetY)
+
+    const factorX = isLeft ? (ox + ow - targetX) / ow : (targetX - ox) / ow
+    const factorY = isTop ? (oy + oh - targetY) / oh : (targetY - oy) / oh
+
+    const xSnaps = distX <= tolerance && factorX > 0 && factorX * ow >= minSize
+    const ySnaps = distY <= tolerance && factorY > 0 && factorY * oh >= minSize
+
+    if (xSnaps && ySnaps) {
+      if (Math.abs(factorX - factorY) < 0.08) {
+        artboardFactor = distX <= distY ? factorX : factorY
+        snapXGuide = targetX
+        snapYGuide = targetY
+      } else if (distX <= distY) {
+        artboardFactor = factorX
+        snapXGuide = targetX
+      } else {
+        artboardFactor = factorY
+        snapYGuide = targetY
+      }
+    } else if (xSnaps) {
+      artboardFactor = factorX
+      snapXGuide = targetX
+    } else if (ySnaps) {
+      artboardFactor = factorY
+      snapYGuide = targetY
+    }
+  }
+
+  if (artboardFactor != null) {
+    const w = Math.max(minSize, Math.round(ow * artboardFactor))
+    const h = Math.max(minSize, Math.round(oh * artboardFactor))
+    const x = isLeft ? Math.round(ox + (ow - w)) : ox
+    const y = isTop ? Math.round(oy + (oh - h)) : oy
+
+    return {
+      factor: artboardFactor,
+      w,
+      h,
+      x,
+      y,
+      snapXGuide,
+      snapYGuide,
+    }
+  }
 
   let bestMatchW: { target: TargetBox; dist: number; factor: number } | null = null
   let bestMatchH: { target: TargetBox; dist: number; factor: number } | null = null
