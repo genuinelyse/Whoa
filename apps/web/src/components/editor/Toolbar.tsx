@@ -405,15 +405,15 @@ export default function Toolbar() {
                   <div className="my-0.5 h-px w-4 bg-white/20" />
                   <button
                     type="button"
-                    id="image-bg-align-btn"
-                    data-testid="image-bg-align-btn"
+                    id="image-bg-align-collapse-btn"
+                    data-testid="image-bg-align-collapse-btn"
                     aria-label="Collapse background positions alignment"
-                    title="Collapse"
+                    title="Collapse background positions alignment"
                     aria-expanded={true}
                     onClick={() => setIsAlignExpanded(false)}
                     className="grid h-8 w-8 place-items-center rounded-full text-white/60 transition-all hover:bg-white/20 hover:text-white active:scale-90 focus:outline-none"
                   >
-                    <ChevronDown className="h-4 w-4" />
+                    <ChevronDown className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
               ) : (
