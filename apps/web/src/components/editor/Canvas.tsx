@@ -1742,9 +1742,10 @@ export default function Canvas() {
         >
           {snapGuides && snapGuides.active && (
             <>
-              <div
-                key="snap-x-center"
-                aria-hidden="true"
+              {snapGuides.xGuides.includes(preset.w / 2) && (
+                <div
+                  key="snap-x-center"
+                  aria-hidden="true"
                 data-testid="snap-guide-vertical"
                 data-snapped={snapGuides.xGuides.includes(preset.w / 2)}
                 style={{
@@ -1754,9 +1755,10 @@ export default function Canvas() {
                   height: preset.h + 96 / eff,
                   borderLeft: `${Math.max(1, 1.5 / eff)}px solid ${snapGuides.xGuides.includes(preset.w / 2) ? '#ff3b30' : '#eeeeee'}`,
                   pointerEvents: 'none',
-                  zIndex: 70,
-                }}
-              />
+                    zIndex: 70,
+                  }}
+                />
+              )}
               {Array.from(new Set(snapGuides.xGuides.filter((x) => x !== preset.w / 2))).map((x, idx) => (
                 <div
                   key={`snap-x-${x}-${idx}`}
@@ -1774,9 +1776,10 @@ export default function Canvas() {
                   }}
                 />
               ))}
-              <div
-                key="snap-y-center"
-                aria-hidden="true"
+              {snapGuides.yGuides.includes(preset.h / 2) && (
+                <div
+                  key="snap-y-center"
+                  aria-hidden="true"
                 data-testid="snap-guide-horizontal"
                 data-snapped={snapGuides.yGuides.includes(preset.h / 2)}
                 style={{
@@ -1784,11 +1787,12 @@ export default function Canvas() {
                   left: -48 / eff,
                   top: preset.h / 2,
                   width: preset.w + 96 / eff,
-                  borderTop: `${Math.max(1, 1.5 / eff)}px solid ${snapGuides.yGuides.includes(preset.h / 2) ? '#ff3b30' : '#eeeeee'}`,
-                  pointerEvents: 'none',
-                  zIndex: 70,
-                }}
-              />
+                    borderTop: `${Math.max(1, 1.5 / eff)}px solid ${snapGuides.yGuides.includes(preset.h / 2) ? '#ff3b30' : '#eeeeee'}`,
+                    pointerEvents: 'none',
+                    zIndex: 70,
+                  }}
+                />
+              )}
               {Array.from(new Set(snapGuides.yGuides.filter((y) => y !== preset.h / 2))).map((y, idx) => (
                 <div
                   key={`snap-y-${y}-${idx}`}
