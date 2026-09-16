@@ -57,154 +57,42 @@ export default function Toolbar() {
     setPositionMode('freehand')
   }
 
-  const handleTop = () => {
+  const updateImagePosition = (position: string, fit?: 'cover' | 'contain') => {
     if (!selected) return
     const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
     for (const id of ids) {
       const layer = project.layers.find((l) => l.id === id)
-      if (layer && layer.type === 'image') {
-        updateLayer(id, { y: 0 })
-      }
+      if (layer?.type === 'image') updateLayer(id, { imagePosition: position, ...(fit ? { imageFit: fit } : {}) })
     }
+  }
+
+  const handleTop = () => {
+    updateImagePosition('center top')
     setPositionMode('top')
   }
 
   const handleMid = () => {
-    if (!selected) return
-    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
-    for (const id of ids) {
-      const layer = project.layers.find((l) => l.id === id)
-      if (layer && layer.type === 'image') {
-        const newX = Math.round((project.preset.w - layer.w) / 2)
-        const newY = Math.round((project.preset.h - layer.h) / 2)
-        updateLayer(id, { x: newX, y: newY })
-      }
-    }
+    updateImagePosition('center center')
     setPositionMode('mid')
   }
 
   const handleLeft = () => {
-    if (!selected) return
-    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
-    for (const id of ids) {
-      const layer = project.layers.find((l) => l.id === id)
-      if (layer && layer.type === 'image') {
-        updateLayer(id, { x: 0 })
-      }
-    }
+    updateImagePosition('left center')
     setPositionMode('left')
   }
 
   const handleRight = () => {
-    if (!selected) return
-    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
-    for (const id of ids) {
-      const layer = project.layers.find((l) => l.id === id)
-      if (layer && layer.type === 'image') {
-        const newX = Math.max(0, Math.round(project.preset.w - layer.w))
-        updateLayer(id, { x: newX })
-      }
-    }
+    updateImagePosition('right center')
     setPositionMode('right')
   }
 
   const handleContain = () => {
-    if (!selected) return
-    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
-    for (const id of ids) {
-      const layer = project.layers.find((l) => l.id === id)
-      if (!layer || layer.type !== 'image') continue
-
-      const domImg = (document.querySelector(`[data-testid="layer-${id}"] img`) ||
-        document.querySelector(`[data-layer-id="${id}"] img`)) as HTMLImageElement | null
-
-      const applyContain = (r: number) => {
-        const ratio = r > 0 && !isNaN(r) ? r : (layer.w / layer.h)
-        let newW = project.preset.w
-        let newH = Math.round(newW / ratio)
-        if (newH > project.preset.h) {
-          newH = project.preset.h
-          newW = Math.round(newH * ratio)
-        }
-        const newX = Math.round((project.preset.w - newW) / 2)
-        const newY = Math.round((project.preset.h - newH) / 2)
-        updateLayer(id, {
-          x: newX,
-          y: newY,
-          w: newW,
-          h: newH,
-        })
-      }
-
-      if (domImg && domImg.naturalWidth > 0 && domImg.naturalHeight > 0) {
-        applyContain(domImg.naturalWidth / domImg.naturalHeight)
-      } else if (layer.src) {
-        const temp = new Image()
-        temp.onload = () => {
-          if (temp.naturalWidth > 0 && temp.naturalHeight > 0) {
-            applyContain(temp.naturalWidth / temp.naturalHeight)
-          } else {
-            applyContain(layer.w / layer.h)
-          }
-        }
-        temp.onerror = () => applyContain(layer.w / layer.h)
-        temp.src = layer.src
-      } else {
-        applyContain(layer.w / layer.h)
-      }
-    }
+    updateImagePosition('center center', 'contain')
     setPositionMode('contain')
   }
 
   const handleOriginalRatio = () => {
-    if (!selected) return
-    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
-    for (const id of ids) {
-      const layer = project.layers.find((l) => l.id === id)
-      if (!layer || layer.type !== 'image') continue
-
-      const domImg = (document.querySelector(`[data-testid="layer-${id}"] img`) ||
-        document.querySelector(`[data-layer-id="${id}"] img`)) as HTMLImageElement | null
-
-      const applyOrigRatio = (r: number) => {
-        const ratio = r > 0 && !isNaN(r) ? r : (layer.w / layer.h)
-        let newW = layer.w
-        let newH = Math.round(newW / ratio)
-        if (newH > project.preset.h) {
-          newH = project.preset.h
-          newW = Math.round(newH * ratio)
-        }
-        if (newW > project.preset.w) {
-          newW = project.preset.w
-          newH = Math.round(newW / ratio)
-        }
-        const newX = Math.round(layer.x + (layer.w - newW) / 2)
-        const newY = Math.round(layer.y + (layer.h - newH) / 2)
-        updateLayer(id, {
-          w: newW,
-          h: newH,
-          x: newX,
-          y: newY,
-        })
-      }
-
-      if (domImg && domImg.naturalWidth > 0 && domImg.naturalHeight > 0) {
-        applyOrigRatio(domImg.naturalWidth / domImg.naturalHeight)
-      } else if (layer.src) {
-        const temp = new Image()
-        temp.onload = () => {
-          if (temp.naturalWidth > 0 && temp.naturalHeight > 0) {
-            applyOrigRatio(temp.naturalWidth / temp.naturalHeight)
-          } else {
-            applyOrigRatio(layer.w / layer.h)
-          }
-        }
-        temp.onerror = () => applyOrigRatio(layer.w / layer.h)
-        temp.src = layer.src
-      } else {
-        applyOrigRatio(layer.w / layer.h)
-      }
-    }
+    updateImagePosition('center center', 'cover')
     setPositionMode('original-aspect-ratio')
   }
 

@@ -3240,7 +3240,13 @@ function LayerContent({
         src={layer.src}
         alt=""
         draggable={false}
-        style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: layer.radius || 0 }}
+        style={{
+        width: '100%',
+        height: '100%',
+        objectFit: layer.imageFit || 'cover',
+        objectPosition: layer.imagePosition || 'center center',
+        borderRadius: layer.radius || 0,
+      }}
       />
     )
   }
