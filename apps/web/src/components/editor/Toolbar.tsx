@@ -147,6 +147,10 @@ export default function Toolbar() {
       ]
     : alignOptions
 
+  const floatingActionKeys = new Set(['color', 'dup', 'del'])
+  const floatingItems = selected ? items.filter((it) => floatingActionKeys.has(it.key)) : []
+  const toolbarItems = selected ? items.filter((it) => !floatingActionKeys.has(it.key)) : items
+
   const renderItem = (it: Item) => {
     const isTimeline = it.key === 'timeline'
     const button = (
@@ -203,15 +207,40 @@ export default function Toolbar() {
   }
 
   return (
-    <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">
-      {renderItem(snapItem)}
-      {renderItem(timelineItem)}
-      <div className={`flex shrink-0 items-center gap-1 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[800px] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
-        {groupItems.map(renderItem)}
+    <>
+      {floatingItems.length > 0 && (
+        <div
+          className="absolute bottom-[4.5rem] right-3 z-30 flex items-center gap-1 rounded-2xl border border-white/10 bg-black/70 p-1.5 shadow-xl backdrop-blur-md"
+          data-testid="floating-action-group"
+          aria-label="Layer actions"
+        >
+          {floatingItems.map((it) => (
+            <button
+              key={it.key}
+              type="button"
+              data-testid={`floating-tool-${it.key}`}
+              aria-label={it.label}
+              title={it.label}
+              onClick={() => (it.onClick ? it.onClick() : openTool(it.key))}
+              className={`grid h-10 w-10 place-items-center rounded-xl transition-colors active:scale-95 ${
+                it.danger ? 'text-danger hover:bg-danger/15' : 'text-white/85 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              <span className="[&>svg]:h-5 [&>svg]:w-5">{it.icon}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">
+        {renderItem(snapItem)}
+        {renderItem(timelineItem)}
+        <div className={`flex shrink-0 items-center gap-1 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[800px] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
+          {groupItems.map(renderItem)}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {toolbarItems.map(renderItem)}
+        </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {items.map(renderItem)}
-      </div>
-    </div>
+    </>
   )
 }
