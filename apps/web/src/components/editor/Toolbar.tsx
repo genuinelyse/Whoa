@@ -1,6 +1,6 @@
 import {
   Type, Shapes, Sticker, Image as ImageIcon, Layers as LayersIcon, Palette,
-  Copy, Trash2, Wand2, Droplets, AlignLeft, Bold, PaintBucket, Square,
+  Copy, Trash2, Wand2, AlignLeft, Bold, PaintBucket, Square,
   ArrowUp, ArrowDown, Scissors, Crop, FolderPlus, Ungroup, Component as ComponentIcon,
   AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd,
   AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd,
@@ -33,7 +33,6 @@ export default function Toolbar() {
   } else {
     const common: Item[] = [
       { key: 'animate', label: 'Animate', icon: <Wand2 /> },
-      { key: 'opacity', label: 'Opacity', icon: <Droplets /> },
       { key: 'up', label: 'Forward', icon: <ArrowUp />, onClick: () => reorder(selected.id, 1) },
       { key: 'down', label: 'Back', icon: <ArrowDown />, onClick: () => reorder(selected.id, -1) },
       { key: 'dup', label: 'Duplicate', icon: <Copy />, onClick: () => duplicate(selected.id) },
