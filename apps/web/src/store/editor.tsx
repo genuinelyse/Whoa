@@ -25,10 +25,20 @@ interface State {
   timelineOpen: boolean
 }
 
+export type AlignMode =
+  | 'left'
+  | 'center'
+  | 'right'
+  | 'top'
+  | 'middle'
+  | 'bottom'
+  | 'distribute-h'
+  | 'distribute-v'
+
 type Action =
   | { t: 'select'; id: string | null; additive?: boolean; ids?: string[] }
   | { t: 'toggleSelect'; id: string }
-  | { t: 'alignSelected'; mode: 'left' | 'center' | 'right' | 'middle'; measured?: Record<string, { x: number; y: number; w: number; h: number }>; targetGroupId?: string }
+  | { t: 'alignSelected'; mode: AlignMode; measured?: Record<string, { x: number; y: number; w: number; h: number }>; targetGroupId?: string }
   | { t: 'tool'; tool: string | null }
   | { t: 'addLayer'; layer: Layer }
   | { t: 'updateLayer'; id: string; patch: Partial<Layer> }
@@ -105,19 +115,65 @@ function reducer(state: State, a: Action): State {
         const top = Math.min(...children.map((l) => boxes.get(l.id)!.y))
         const bottom = Math.max(...children.map((l) => boxes.get(l.id)!.y + boxes.get(l.id)!.h))
 
+        // Compute distribution maps if needed
+        const isDistributeH = a.mode === 'distribute-h'
+        const isDistributeV = a.mode === 'distribute-v'
+
+        const sortedX = isDistributeH
+          ? [...children].sort((c1, c2) => boxes.get(c1.id)!.x - boxes.get(c2.id)!.x)
+          : []
+        const sortedY = isDistributeV
+          ? [...children].sort((c1, c2) => boxes.get(c1.id)!.y - boxes.get(c2.id)!.y)
+          : []
+
+        let distHGap = 0
+        if (isDistributeH && children.length > 2) {
+          const totalW = children.reduce((sum, c) => sum + boxes.get(c.id)!.w, 0)
+          const span = right - left
+          distHGap = (span - totalW) / (children.length - 1)
+        }
+        let distVGap = 0
+        if (isDistributeV && children.length > 2) {
+          const totalH = children.reduce((sum, c) => sum + boxes.get(c.id)!.h, 0)
+          const span = bottom - top
+          distVGap = (span - totalH) / (children.length - 1)
+        }
+
+        const distPositionsX = new Map<string, number>()
+        if (isDistributeH) {
+          let currX = left
+          for (const c of sortedX) {
+            distPositionsX.set(c.id, currX)
+            currX += boxes.get(c.id)!.w + distHGap
+          }
+        }
+
+        const distPositionsY = new Map<string, number>()
+        if (isDistributeV) {
+          let currY = top
+          for (const c of sortedY) {
+            distPositionsY.set(c.id, currY)
+            currY += boxes.get(c.id)!.h + distVGap
+          }
+        }
+
         // Compute new positions and displacement deltas for each child
         const childDeltas = new Map<string, { dx: number; dy: number; newX: number; newY: number; w: number; h: number }>()
         for (const child of children) {
           const b = boxes.get(child.id)!
-          const nx =
-            a.mode === 'left'
-              ? left
-              : a.mode === 'right'
-                ? right - b.w
-                : a.mode === 'center'
-                  ? (left + right - b.w) / 2
-                  : b.x
-          const ny = a.mode === 'middle' ? (top + bottom - b.h) / 2 : b.y
+          let nx = b.x
+          let ny = b.y
+
+          if (a.mode === 'left') nx = left
+          else if (a.mode === 'right') nx = right - b.w
+          else if (a.mode === 'center') nx = (left + right - b.w) / 2
+          else if (a.mode === 'distribute-h') nx = distPositionsX.get(child.id) ?? b.x
+
+          if (a.mode === 'top') ny = top
+          else if (a.mode === 'bottom') ny = bottom - b.h
+          else if (a.mode === 'middle') ny = (top + bottom - b.h) / 2
+          else if (a.mode === 'distribute-v') ny = distPositionsY.get(child.id) ?? b.y
+
           childDeltas.set(child.id, {
             dx: Math.round(nx) - b.x,
             dy: Math.round(ny) - b.y,
@@ -179,9 +235,9 @@ function reducer(state: State, a: Action): State {
         return { ...state, project: touch({ ...p, layers: updatedLayers }) }
       }
 
-      // Multi-selection alignment
+      // Multi-selection alignment (or single element alignment to canvas)
       const selected = p.layers.filter((layer) => state.selectedIds.includes(layer.id))
-      if (selected.length < 2) return state
+      if (selected.length < 1) return state
 
       const getBox = (layer: Layer) => {
         if (a.measured && a.measured[layer.id]) {
@@ -197,25 +253,71 @@ function reducer(state: State, a: Action): State {
       }
 
       const boxes = new Map(selected.map((layer) => [layer.id, getBox(layer)]))
-      const left = Math.min(...selected.map((l) => boxes.get(l.id)!.x))
-      const right = Math.max(...selected.map((l) => boxes.get(l.id)!.x + boxes.get(l.id)!.w))
-      const top = Math.min(...selected.map((l) => boxes.get(l.id)!.y))
-      const bottom = Math.max(...selected.map((l) => boxes.get(l.id)!.y + boxes.get(l.id)!.h))
+      const isSingle = selected.length === 1
+      const left = isSingle ? 0 : Math.min(...selected.map((l) => boxes.get(l.id)!.x))
+      const right = isSingle ? p.preset.w : Math.max(...selected.map((l) => boxes.get(l.id)!.x + boxes.get(l.id)!.w))
+      const top = isSingle ? 0 : Math.min(...selected.map((l) => boxes.get(l.id)!.y))
+      const bottom = isSingle ? p.preset.h : Math.max(...selected.map((l) => boxes.get(l.id)!.y + boxes.get(l.id)!.h))
+
+      const isDistributeH = a.mode === 'distribute-h'
+      const isDistributeV = a.mode === 'distribute-v'
+
+      const sortedX = isDistributeH
+        ? [...selected].sort((c1, c2) => boxes.get(c1.id)!.x - boxes.get(c2.id)!.x)
+        : []
+      const sortedY = isDistributeV
+        ? [...selected].sort((c1, c2) => boxes.get(c1.id)!.y - boxes.get(c2.id)!.y)
+        : []
+
+      let distHGap = 0
+      if (isDistributeH && selected.length > 2) {
+        const totalW = selected.reduce((sum, c) => sum + boxes.get(c.id)!.w, 0)
+        const span = right - left
+        distHGap = (span - totalW) / (selected.length - 1)
+      }
+      let distVGap = 0
+      if (isDistributeV && selected.length > 2) {
+        const totalH = selected.reduce((sum, c) => sum + boxes.get(c.id)!.h, 0)
+        const span = bottom - top
+        distVGap = (span - totalH) / (selected.length - 1)
+      }
+
+      const distPositionsX = new Map<string, number>()
+      if (isDistributeH) {
+        let currX = left
+        for (const c of sortedX) {
+          distPositionsX.set(c.id, currX)
+          currX += boxes.get(c.id)!.w + distHGap
+        }
+      }
+
+      const distPositionsY = new Map<string, number>()
+      if (isDistributeV) {
+        let currY = top
+        for (const c of sortedY) {
+          distPositionsY.set(c.id, currY)
+          currY += boxes.get(c.id)!.h + distVGap
+        }
+      }
 
       const groupDeltas = new Map<string, { dx: number; dy: number }>()
 
       let layers = p.layers.map((layer) => {
         if (!state.selectedIds.includes(layer.id)) return layer
         const b = boxes.get(layer.id)!
-        const x =
-          a.mode === 'left'
-            ? left
-            : a.mode === 'right'
-              ? right - b.w
-              : a.mode === 'center'
-                ? (left + right - b.w) / 2
-                : b.x
-        const y = a.mode === 'middle' ? (top + bottom - b.h) / 2 : b.y
+        let x = b.x
+        let y = b.y
+
+        if (a.mode === 'left') x = left
+        else if (a.mode === 'right') x = right - b.w
+        else if (a.mode === 'center') x = (left + right - b.w) / 2
+        else if (a.mode === 'distribute-h') x = distPositionsX.get(layer.id) ?? b.x
+
+        if (a.mode === 'top') y = top
+        else if (a.mode === 'bottom') y = bottom - b.h
+        else if (a.mode === 'middle') y = (top + bottom - b.h) / 2
+        else if (a.mode === 'distribute-v') y = distPositionsY.get(layer.id) ?? b.y
+
         const newX = Math.round(x)
         const newY = Math.round(y)
 
@@ -425,7 +527,7 @@ interface Ctx extends State {
   selectedIds: string[]
   select: (id: string | null, additive?: boolean, ids?: string[]) => void
   toggleSelect: (id: string) => void
-  alignSelected: (mode: 'left' | 'center' | 'right' | 'middle', measured?: Record<string, { x: number; y: number; w: number; h: number }>, targetGroupId?: string) => void
+  alignSelected: (mode: AlignMode, measured?: Record<string, { x: number; y: number; w: number; h: number }>, targetGroupId?: string) => void
   openTool: (tool: string | null) => void
   addLayer: (type: LayerType, extra?: Partial<Layer>) => void
   updateLayer: (id: string, patch: Partial<Layer>) => void
@@ -456,7 +558,7 @@ export function EditorProvider({ project, children }: { project: Project; childr
 
   const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
-  const alignSelected = useCallback((mode: 'left' | 'center' | 'right' | 'middle', measured?: Record<string, { x: number; y: number; w: number; h: number }>, targetGroupId?: string) => dispatch({ t: 'alignSelected', mode, measured, targetGroupId }), [])
+  const alignSelected = useCallback((mode: AlignMode, measured?: Record<string, { x: number; y: number; w: number; h: number }>, targetGroupId?: string) => dispatch({ t: 'alignSelected', mode, measured, targetGroupId }), [])
   const openTool = useCallback((tool: string | null) => dispatch({ t: 'tool', tool }), [])
   const updateLayer = useCallback((id: string, patch: Partial<Layer>) => dispatch({ t: 'updateLayer', id, patch }), [])
   const deleteLayer = useCallback((id: string) => dispatch({ t: 'deleteLayer', id }), [])

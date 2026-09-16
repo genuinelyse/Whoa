@@ -5,6 +5,7 @@ import { useEditor } from '#/store/editor'
 import { getDescendantLayers, getTopmostGroup } from '#/lib/groups'
 import { findSizeMatch, getCandidateTargets, type SizeMatch } from '#/lib/sizeMatch'
 import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
+import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null)
@@ -174,6 +175,7 @@ export default function Canvas() {
   const [snapGuides, setSnapGuides] = useState<{ active: boolean; xGuides: number[]; yGuides: number[] } | null>(null)
   const [sizeMatch, setSizeMatch] = useState<SizeMatch | null>(null)
   const [gapMatch, setGapMatch] = useState<GapMatchResult | null>(null)
+  const [elementAlign, setElementAlign] = useState<ElementAlignResult | null>(null)
   const marqueeSession = useRef<{ active: boolean; start: { x: number; y: number }; update?: (event: PointerEvent) => void; finish?: (event: PointerEvent) => void }>({ active: false, start: { x: 0, y: 0 } })
   const marqueeLongPress = useRef<number | null>(null)
   const [pinchActive, setPinchActive] = useState(false)
@@ -306,6 +308,33 @@ export default function Canvas() {
           if (artboardSnapRef.current) {
             const excludeIds = getExcludeIds(g.id, g.group)
             const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
+
+            // Calculate element-to-element alignment
+            const elemAlign = findElementAlignMatch(
+              { x: bounds.left, y: bounds.top, w: targetW, h: targetH },
+              candidates,
+              SNAP_TOLERANCE_PX / eff,
+            )
+
+            let hasElemX = false
+            let hasElemY = false
+
+            if (elemAlign.xMatches.length > 0) {
+              if (activeXGuides.length === 0 || Math.abs(elemAlign.dx) <= Math.abs(finalDx)) {
+                finalDx = elemAlign.dx
+                activeXGuides = elemAlign.xMatches.map((m) => m.guideCoord)
+                hasElemX = true
+              }
+            }
+
+            if (elemAlign.yMatches.length > 0) {
+              if (activeYGuides.length === 0 || Math.abs(elemAlign.dy) <= Math.abs(finalDy)) {
+                finalDy = elemAlign.dy
+                activeYGuides = elemAlign.yMatches.map((m) => m.guideCoord)
+                hasElemY = true
+              }
+            }
+
             if (candidates.length >= 2) {
               const gapRes = findGapMatch(
                 { x: bounds.left, y: bounds.top, w: targetW, h: targetH },
@@ -314,13 +343,15 @@ export default function Canvas() {
               )
               const hasGapY = gapRes.gaps.some((item) => item.axis === 'y')
               const hasGapX = gapRes.gaps.some((item) => item.axis === 'x')
-              if (hasGapY) {
+              if (hasGapY && (!hasElemY || Math.abs(gapRes.dy) < Math.abs(elemAlign.dy))) {
                 finalDy = gapRes.dy
                 activeYGuides = []
+                hasElemY = false
               }
-              if (hasGapX) {
+              if (hasGapX && (!hasElemX || Math.abs(gapRes.dx) < Math.abs(elemAlign.dx))) {
                 finalDx = gapRes.dx
                 activeXGuides = []
+                hasElemX = false
               }
               if (gapRes.gaps.length > 0) {
                 setGapMatch(gapRes)
@@ -330,10 +361,27 @@ export default function Canvas() {
             } else {
               setGapMatch(null)
             }
-            setSnapGuides({ active: true, xGuides: activeXGuides, yGuides: activeYGuides })
+
+            if (hasElemX || hasElemY) {
+              setElementAlign({
+                dx: finalDx,
+                dy: finalDy,
+                xMatches: hasElemX ? elemAlign.xMatches : [],
+                yMatches: hasElemY ? elemAlign.yMatches : [],
+              })
+            } else {
+              setElementAlign(null)
+            }
+
+            setSnapGuides({
+              active: true,
+              xGuides: Array.from(new Set(activeXGuides)),
+              yGuides: Array.from(new Set(activeYGuides)),
+            })
           } else {
             setSnapGuides(null)
             setGapMatch(null)
+            setElementAlign(null)
           }
 
           if (g.group) {
@@ -753,6 +801,7 @@ export default function Canvas() {
     setSnapGuides(null)
     setSizeMatch(null)
     setGapMatch(null)
+    setElementAlign(null)
   }
   window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -1708,25 +1757,23 @@ export default function Canvas() {
                   zIndex: 70,
                 }}
               />
-              {snapGuides.xGuides
-                .filter((x) => x !== preset.w / 2)
-                .map((x) => (
-                  <div
-                    key={`snap-x-${x}`}
-                    aria-hidden="true"
-                    data-testid="snap-guide-vertical"
-                    data-snapped="true"
-                    style={{
-                      position: 'absolute',
-                      left: x,
-                      top: -48 / eff,
-                      height: preset.h + 96 / eff,
-                      borderLeft: `${Math.max(1, 1.5 / eff)}px solid #ff3b30`,
-                      pointerEvents: 'none',
-                      zIndex: 70,
-                    }}
-                  />
-                ))}
+              {Array.from(new Set(snapGuides.xGuides.filter((x) => x !== preset.w / 2))).map((x, idx) => (
+                <div
+                  key={`snap-x-${x}-${idx}`}
+                  aria-hidden="true"
+                  data-testid="snap-guide-vertical"
+                  data-snapped="true"
+                  style={{
+                    position: 'absolute',
+                    left: x,
+                    top: -48 / eff,
+                    height: preset.h + 96 / eff,
+                    borderLeft: `${Math.max(1, 1.5 / eff)}px solid #ff3b30`,
+                    pointerEvents: 'none',
+                    zIndex: 70,
+                  }}
+                />
+              ))}
               <div
                 key="snap-y-center"
                 aria-hidden="true"
@@ -1742,25 +1789,23 @@ export default function Canvas() {
                   zIndex: 70,
                 }}
               />
-              {snapGuides.yGuides
-                .filter((y) => y !== preset.h / 2)
-                .map((y) => (
-                  <div
-                    key={`snap-y-${y}`}
-                    aria-hidden="true"
-                    data-testid="snap-guide-horizontal"
-                    data-snapped="true"
-                    style={{
-                      position: 'absolute',
-                      left: -48 / eff,
-                      top: y,
-                      width: preset.w + 96 / eff,
-                      borderTop: `${Math.max(1, 1.5 / eff)}px solid #ff3b30`,
-                      pointerEvents: 'none',
-                      zIndex: 70,
-                    }}
-                  />
-                ))}
+              {Array.from(new Set(snapGuides.yGuides.filter((y) => y !== preset.h / 2))).map((y, idx) => (
+                <div
+                  key={`snap-y-${y}-${idx}`}
+                  aria-hidden="true"
+                  data-testid="snap-guide-horizontal"
+                  data-snapped="true"
+                  style={{
+                    position: 'absolute',
+                    left: -48 / eff,
+                    top: y,
+                    width: preset.w + 96 / eff,
+                    borderTop: `${Math.max(1, 1.5 / eff)}px solid #ff3b30`,
+                    pointerEvents: 'none',
+                    zIndex: 70,
+                  }}
+                />
+              ))}
             </>
           )}
           {project.layers.map((l) => {
@@ -2367,6 +2412,110 @@ export default function Canvas() {
                     >
                       {Math.round(gap.size)} px
                     </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* ELEMENT-TO-ELEMENT ALIGNMENT SMART GUIDES */}
+          {elementAlign && (elementAlign.xMatches.length > 0 || elementAlign.yMatches.length > 0) && (
+            <div data-testid="element-align-guides" className="pointer-events-none">
+              {elementAlign.xMatches.map((m, idx) => {
+                const eff = scale * view.scale
+                const lineH = Math.max(1, m.endCoord - m.startCoord)
+                return (
+                  <div
+                    key={`elem-align-x-${idx}`}
+                    data-testid={`element-align-guide-x-${idx}`}
+                    data-align-type={m.type}
+                    data-target-id={m.targetBox.id}
+                    style={{
+                      position: 'absolute',
+                      left: m.guideCoord,
+                      top: m.startCoord,
+                      width: 1.5 / eff,
+                      height: lineH,
+                      background: '#06b6d4',
+                      zIndex: 76,
+                      transform: 'translateX(-50%)',
+                    }}
+                  >
+                    {/* Top indicator pip */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        width: 5 / eff,
+                        height: 5 / eff,
+                        borderRadius: '9999px',
+                        background: '#06b6d4',
+                      }}
+                    />
+                    {/* Bottom indicator pip */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: '50%',
+                        transform: 'translate(-50%, 50%)',
+                        width: 5 / eff,
+                        height: 5 / eff,
+                        borderRadius: '9999px',
+                        background: '#06b6d4',
+                      }}
+                    />
+                  </div>
+                )
+              })}
+              {elementAlign.yMatches.map((m, idx) => {
+                const eff = scale * view.scale
+                const lineW = Math.max(1, m.endCoord - m.startCoord)
+                return (
+                  <div
+                    key={`elem-align-y-${idx}`}
+                    data-testid={`element-align-guide-y-${idx}`}
+                    data-align-type={m.type}
+                    data-target-id={m.targetBox.id}
+                    style={{
+                      position: 'absolute',
+                      left: m.startCoord,
+                      top: m.guideCoord,
+                      width: lineW,
+                      height: 1.5 / eff,
+                      background: '#06b6d4',
+                      zIndex: 76,
+                      transform: 'translateY(-50%)',
+                    }}
+                  >
+                    {/* Left indicator pip */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        top: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        width: 5 / eff,
+                        height: 5 / eff,
+                        borderRadius: '9999px',
+                        background: '#06b6d4',
+                      }}
+                    />
+                    {/* Right indicator pip */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: '50%',
+                        transform: 'translate(50%, -50%)',
+                        width: 5 / eff,
+                        height: 5 / eff,
+                        borderRadius: '9999px',
+                        background: '#06b6d4',
+                      }}
+                    />
                   </div>
                 )
               })}

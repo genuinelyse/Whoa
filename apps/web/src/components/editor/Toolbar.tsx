@@ -2,10 +2,12 @@ import {
   Type, Shapes, Sticker, Image as ImageIcon, Layers as LayersIcon, Palette,
   Copy, Trash2, Wand2, Droplets, AlignLeft, Bold, PaintBucket, Square,
   ArrowUp, ArrowDown, Scissors, Crop, FolderPlus, Ungroup, Component as ComponentIcon,
-  AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd, AlignVerticalJustifyCenter,
+  AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd,
+  AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd,
+  AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Magnet, ChevronUp, ChevronDown,
 } from 'lucide-react'
-import { useEditor } from '#/store/editor'
+import { useEditor, type AlignMode } from '#/store/editor'
 
 type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () => void; danger?: boolean; accent?: boolean; active?: boolean }
 
@@ -90,7 +92,7 @@ export default function Toolbar() {
   const isGroupLayer = selected?.type === 'group'
   const isGroup = isMulti || isGroupLayer
 
-  const handleAlign = (mode: 'left' | 'center' | 'right' | 'middle') => {
+  const handleAlign = (mode: AlignMode) => {
     const isSingleGroup = selectedIds.length === 1 && selected?.type === 'group'
     const targetIds = isSingleGroup
       ? project.layers.filter((l) => l.groupId === selected.id).map((l) => l.id)
@@ -115,7 +117,11 @@ export default function Toolbar() {
     { key: 'align-left', label: 'Left', icon: <AlignHorizontalJustifyStart />, onClick: () => handleAlign('left') },
     { key: 'align-center', label: 'Center', icon: <AlignHorizontalJustifyCenter />, onClick: () => handleAlign('center') },
     { key: 'align-right', label: 'Right', icon: <AlignHorizontalJustifyEnd />, onClick: () => handleAlign('right') },
+    { key: 'align-top', label: 'Top', icon: <AlignVerticalJustifyStart />, onClick: () => handleAlign('top') },
     { key: 'align-middle', label: 'Middle', icon: <AlignVerticalJustifyCenter />, onClick: () => handleAlign('middle') },
+    { key: 'align-bottom', label: 'Bottom', icon: <AlignVerticalJustifyEnd />, onClick: () => handleAlign('bottom') },
+    { key: 'distribute-h', label: 'Distribute H', icon: <AlignHorizontalDistributeCenter />, onClick: () => handleAlign('distribute-h') },
+    { key: 'distribute-v', label: 'Distribute V', icon: <AlignVerticalDistributeCenter />, onClick: () => handleAlign('distribute-v') },
   ]
 
   const groupItems: Item[] = isMulti
@@ -200,7 +206,7 @@ export default function Toolbar() {
     <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">
       {renderItem(snapItem)}
       {renderItem(timelineItem)}
-      <div className={`flex shrink-0 items-center gap-1 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[400px] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
+      <div className={`flex shrink-0 items-center gap-1 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[800px] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
         {groupItems.map(renderItem)}
       </div>
       <div className="flex shrink-0 items-center gap-1">
