@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from 'lucide-react'
 import type { Layer, LayerType } from '#/types'
 import { useEditor } from '#/store/editor'
 import { getDescendantLayers, getTopmostGroup } from '#/lib/groups'
-import { findSizeMatch, getCandidateTargets, type SizeMatch } from '#/lib/sizeMatch'
+import { findCornerSizeMatch, findSizeMatch, getCandidateTargets, type SizeMatch } from '#/lib/sizeMatch'
 import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
 
@@ -404,19 +404,15 @@ export default function Canvas() {
 
       let newW = g.ow
       let newH = g.oh
-      let newX = g.ox
-      let newY = g.oy
 
       if (isLeft) {
         newW = Math.max(15, g.ow - dx)
-        newX = g.ox + (g.ow - newW)
       } else if (isRight) {
         newW = Math.max(15, g.ow + dx)
       }
 
       if (isTop) {
         newH = Math.max(15, g.oh - dy)
-        newY = g.oy + (g.oh - newH)
       } else if (isBottom) {
         newH = Math.max(15, g.oh + dy)
       }
@@ -425,46 +421,37 @@ export default function Canvas() {
 
       if (g.group) {
         const excludeIds = getExcludeIds(g.id, g.group)
-        const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
+        const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w, preset.h, true)
 
         if (isCorner) {
-          let factor = Math.min(newW / g.ow, newH / g.oh)
-          let w = Math.max(20, g.ow * factor)
-          let h = Math.max(20, g.oh * factor)
-          const groupX = isLeft ? g.ox + (g.ow - w) : g.ox
-          const groupY = isTop ? g.oy + (g.oh - h) : g.oy
+          const matchRes = findCornerSizeMatch(
+            g.ow,
+            g.oh,
+            newW,
+            newH,
+            g.ox,
+            g.oy,
+            isLeft,
+            isTop,
+            artboardSnapRef.current ? candidates : [],
+            tol,
+            20,
+          )
 
-          if (artboardSnapRef.current && candidates.length > 0) {
-            const sm = findSizeMatch(w, h, { x: groupX, y: groupY, w, h }, candidates, tol, true, true)
-            if (sm.widthMatch) {
-              factor = sm.snappedW / g.ow
-              w = sm.snappedW
-              h = Math.max(20, Math.round(g.oh * factor))
-              const finalX = isLeft ? g.ox + (g.ow - w) : g.ox
-              const finalY = isTop ? g.oy + (g.oh - h) : g.oy
-              setSizeMatch({
-                active: true,
-                widthMatch: { ...sm.widthMatch, resizingBox: { x: finalX, y: finalY, w, h } },
-              })
-            } else if (sm.heightMatch) {
-              factor = sm.snappedH / g.oh
-              h = sm.snappedH
-              w = Math.max(20, Math.round(g.ow * factor))
-              const finalX = isLeft ? g.ox + (g.ow - w) : g.ox
-              const finalY = isTop ? g.oy + (g.oh - h) : g.oy
-              setSizeMatch({
-                active: true,
-                heightMatch: { ...sm.heightMatch, resizingBox: { x: finalX, y: finalY, w, h } },
-              })
-            } else {
-              setSizeMatch(null)
-            }
+          if (matchRes.widthMatch || matchRes.heightMatch) {
+            setSizeMatch({
+              active: true,
+              widthMatch: matchRes.widthMatch,
+              heightMatch: matchRes.heightMatch,
+            })
           } else {
             setSizeMatch(null)
           }
 
-          const finalX = isLeft ? g.ox + (g.ow - w) : g.ox
-          const finalY = isTop ? g.oy + (g.oh - h) : g.oy
+          const finalX = matchRes.x
+          const finalY = matchRes.y
+          const w = matchRes.w
+          const h = matchRes.h
           const sx = w / g.ow
           const sy = h / g.oh
           for (const item of g.group) {
@@ -628,55 +615,46 @@ export default function Canvas() {
           }
         }
       } else if (isCorner) {
+        const excludeIds = getExcludeIds(g.id)
+        const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w, preset.h, true)
+        const matchRes = findCornerSizeMatch(
+          g.ow,
+          g.oh,
+          newW,
+          newH,
+          g.ox,
+          g.oy,
+          isLeft,
+          isTop,
+          artboardSnapRef.current ? candidates : [],
+          tol,
+          15,
+        )
+
+        if (matchRes.widthMatch || matchRes.heightMatch) {
+          setSizeMatch({
+            active: true,
+            widthMatch: matchRes.widthMatch,
+            heightMatch: matchRes.heightMatch,
+          })
+        } else {
+          setSizeMatch(null)
+        }
+
         if (g.isText) {
-          const factor = Math.min(newW / g.ow, newH / g.oh)
-          const fontSize = Math.max(6, Math.round(g.ofs * factor))
+          const fontSize = Math.max(6, Math.round(g.ofs * matchRes.factor))
           const patch: Partial<Layer> = {
             fontSize,
-            x: Math.round(isLeft ? newX : g.ox),
-            y: Math.round(isTop ? newY : g.oy),
+            x: matchRes.x,
+            y: matchRes.y,
           }
-          if (g.origPadTop) patch.paddingTop = Math.round(g.origPadTop * factor)
-          if (g.origPadRight) patch.paddingRight = Math.round(g.origPadRight * factor)
-          if (g.origPadBottom) patch.paddingBottom = Math.round(g.origPadBottom * factor)
-          if (g.origPadLeft) patch.paddingLeft = Math.round(g.origPadLeft * factor)
+          if (g.origPadTop) patch.paddingTop = Math.round(g.origPadTop * matchRes.factor)
+          if (g.origPadRight) patch.paddingRight = Math.round(g.origPadRight * matchRes.factor)
+          if (g.origPadBottom) patch.paddingBottom = Math.round(g.origPadBottom * matchRes.factor)
+          if (g.origPadLeft) patch.paddingLeft = Math.round(g.origPadLeft * matchRes.factor)
           updateLayer(g.id, patch)
         } else {
-          let factor = Math.min(newW / g.ow, newH / g.oh)
-          let w = Math.max(15, Math.round(g.ow * factor))
-          let h = Math.max(15, Math.round(g.oh * factor))
-
-          const excludeIds = getExcludeIds(g.id)
-          const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
-          const candX = isLeft ? Math.round(g.ox + (g.ow - w)) : g.ox
-          const candY = isTop ? Math.round(g.oy + (g.oh - h)) : g.oy
-
-          if (artboardSnapRef.current && candidates.length > 0) {
-            const sm = findSizeMatch(w, h, { x: candX, y: candY, w, h }, candidates, tol, true, true)
-            if (sm.widthMatch) {
-              const snapFactor = sm.snappedW / g.ow
-              w = sm.snappedW
-              h = Math.max(15, Math.round(g.oh * snapFactor))
-              const finalX = isLeft ? Math.round(g.ox + (g.ow - w)) : g.ox
-              const finalY = isTop ? Math.round(g.oy + (g.oh - h)) : g.oy
-              setSizeMatch({ active: true, widthMatch: { ...sm.widthMatch, resizingBox: { x: finalX, y: finalY, w, h } } })
-            } else if (sm.heightMatch) {
-              const snapFactor = sm.snappedH / g.oh
-              h = sm.snappedH
-              w = Math.max(15, Math.round(g.ow * snapFactor))
-              const finalX = isLeft ? Math.round(g.ox + (g.ow - w)) : g.ox
-              const finalY = isTop ? Math.round(g.oy + (g.oh - h)) : g.oy
-              setSizeMatch({ active: true, heightMatch: { ...sm.heightMatch, resizingBox: { x: finalX, y: finalY, w, h } } })
-            } else {
-              setSizeMatch(null)
-            }
-          } else {
-            setSizeMatch(null)
-          }
-
-          const x = isLeft ? Math.round(g.ox + (g.ow - w)) : g.ox
-          const y = isTop ? Math.round(g.oy + (g.oh - h)) : g.oy
-          updateLayer(g.id, { x, y, w, h })
+          updateLayer(g.id, { x: matchRes.x, y: matchRes.y, w: matchRes.w, h: matchRes.h })
         }
       } else {
         // Single element middle drag handle: increase padding on that side without uniform scale
@@ -698,7 +676,7 @@ export default function Canvas() {
           }
         } else if (g.layerType === 'shape') {
           const excludeIds = getExcludeIds(g.id)
-          const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
+          const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w, preset.h, true)
 
           if (handle === 'r') {
             const rawW = Math.max(15, Math.round(g.ow + dx))
@@ -950,7 +928,7 @@ export default function Canvas() {
         for (const d of getDescendantLayers(id, layersRef.current)) excludeIds.add(d.id)
       }
 
-      const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
+      const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w, preset.h, true)
 
       if (artboardSnapRef.current && candidates.length > 0) {
         const rawW = groupW * ratio
@@ -1000,7 +978,7 @@ export default function Canvas() {
         excludeIds.add(id)
         for (const d of getDescendantLayers(id, layersRef.current)) excludeIds.add(d.id)
       }
-      const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w)
+      const candidates = getCandidateTargets(layersRef.current, excludeIds, layerRefs.current, preset.w, preset.h, true)
 
       if (artboardSnapRef.current && candidates.length > 0) {
         const sm = findSizeMatch(rawW, rawH, { x: p.x0, y: p.y0, w: rawW, h: rawH }, candidates, tol, true, true)
@@ -2179,7 +2157,9 @@ export default function Canvas() {
                     style={{
                       position: 'absolute',
                       left: sizeMatch.widthMatch.targetBox.x,
-                      top: sizeMatch.widthMatch.targetBox.y + sizeMatch.widthMatch.targetBox.h + 8 / (scale * view.scale),
+                      top: sizeMatch.widthMatch.targetBox.type === 'artboard' && sizeMatch.widthMatch.resizingBox.y + sizeMatch.widthMatch.resizingBox.h > preset.h - 35
+                        ? -12 / (scale * view.scale)
+                        : sizeMatch.widthMatch.targetBox.y + sizeMatch.widthMatch.targetBox.h + 8 / (scale * view.scale),
                       width: sizeMatch.widthMatch.targetBox.w,
                       height: 1.5 / (scale * view.scale),
                       background: '#ec4899',
@@ -2258,7 +2238,9 @@ export default function Canvas() {
                   <div
                     style={{
                       position: 'absolute',
-                      left: sizeMatch.heightMatch.targetBox.x + sizeMatch.heightMatch.targetBox.w + 8 / (scale * view.scale),
+                      left: sizeMatch.heightMatch.targetBox.type === 'artboard' && sizeMatch.heightMatch.resizingBox.x + sizeMatch.heightMatch.resizingBox.w > preset.w - 35
+                        ? -12 / (scale * view.scale)
+                        : sizeMatch.heightMatch.targetBox.x + sizeMatch.heightMatch.targetBox.w + 8 / (scale * view.scale),
                       top: sizeMatch.heightMatch.targetBox.y,
                       width: 1.5 / (scale * view.scale),
                       height: sizeMatch.heightMatch.targetBox.h,
