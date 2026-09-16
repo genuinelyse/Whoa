@@ -42,7 +42,9 @@ type Action =
   | { t: 'tool'; tool: string | null }
   | { t: 'addLayer'; layer: Layer }
   | { t: 'updateLayer'; id: string; patch: Partial<Layer> }
+  | { t: 'updateLayers'; ids: string[]; patch: Partial<Layer> }
   | { t: 'deleteLayer'; id: string }
+  | { t: 'deleteLayers'; ids: string[] }
   | { t: 'reorder'; id: string; dir: number }
   | { t: 'duplicate'; id: string }
   | { t: 'createGroup'; ids?: string[]; name?: string; isComponent?: boolean }
@@ -431,6 +433,8 @@ function reducer(state: State, a: Action): State {
       return { ...state, project: touch({ ...p, layers: [...p.layers, a.layer] }), selectedId: a.layer.id, selectedIds: [a.layer.id], tool: null }
     case 'updateLayer':
       return { ...state, project: touch({ ...p, layers: p.layers.map((l) => (l.id === a.id ? { ...l, ...a.patch } : l)) }) }
+    case 'updateLayers':
+      return { ...state, project: touch({ ...p, layers: p.layers.map((l) => (a.ids.includes(l.id) ? { ...l, ...a.patch } : l)) }) }
     case 'createGroup': {
       const targetIds = a.ids || state.selectedIds
       if (!targetIds || targetIds.length === 0) return state
@@ -485,6 +489,17 @@ function reducer(state: State, a: Action): State {
         selectedIds: remainingIds,
       }
     }
+    case 'deleteLayers': {
+      const layers = a.ids.reduce((current, id) => deleteLayerOrGroup(current, id), p.layers)
+      const remainingIds = state.selectedIds.filter((id) => layers.some((l) => l.id === id))
+      return {
+        ...state,
+        project: touch({ ...p, layers }),
+        selectedId: remainingIds.at(-1) ?? null,
+        selectedIds: remainingIds,
+        tool: null,
+      }
+    }
     case 'duplicate': {
       const { newLayers, newSelectedId } = duplicateLayerOrGroup(p.layers, a.id)
       return {
@@ -531,7 +546,9 @@ interface Ctx extends State {
   openTool: (tool: string | null) => void
   addLayer: (type: LayerType, extra?: Partial<Layer>) => void
   updateLayer: (id: string, patch: Partial<Layer>) => void
+  updateLayers: (ids: string[], patch: Partial<Layer>) => void
   deleteLayer: (id: string) => void
+  deleteLayers: (ids: string[]) => void
   duplicate: (id: string) => void
   reorder: (id: string, dir: number) => void
   createGroup: (ids?: string[], name?: string, isComponent?: boolean) => void
@@ -561,7 +578,9 @@ export function EditorProvider({ project, children }: { project: Project; childr
   const alignSelected = useCallback((mode: AlignMode, measured?: Record<string, { x: number; y: number; w: number; h: number }>, targetGroupId?: string) => dispatch({ t: 'alignSelected', mode, measured, targetGroupId }), [])
   const openTool = useCallback((tool: string | null) => dispatch({ t: 'tool', tool }), [])
   const updateLayer = useCallback((id: string, patch: Partial<Layer>) => dispatch({ t: 'updateLayer', id, patch }), [])
+  const updateLayers = useCallback((ids: string[], patch: Partial<Layer>) => dispatch({ t: 'updateLayers', ids, patch }), [])
   const deleteLayer = useCallback((id: string) => dispatch({ t: 'deleteLayer', id }), [])
+  const deleteLayers = useCallback((ids: string[]) => dispatch({ t: 'deleteLayers', ids }), [])
   const duplicate = useCallback((id: string) => dispatch({ t: 'duplicate', id }), [])
   const reorder = useCallback((id: string, dir: number) => dispatch({ t: 'reorder', id, dir }), [])
   const createGroup = useCallback((ids?: string[], name?: string, isComponent = false) => dispatch({ t: 'createGroup', ids, name, isComponent }), [])
@@ -622,12 +641,12 @@ export function EditorProvider({ project, children }: { project: Project; childr
       mode: state.project.mode,
       selected: state.project.layers.find((l) => l.id === state.selectedId) || null,
       selectedIds: state.selectedIds,
-      select, toggleSelect, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder,
+      select, toggleSelect, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder,
       createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent,
       setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration,
       toggleTimeline, setTimelineOpen, nudge,
     }),
-    [state, select, alignSelected, openTool, addLayer, updateLayer, deleteLayer, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration, toggleTimeline, setTimelineOpen, nudge],
+    [state, select, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration, toggleTimeline, setTimelineOpen, nudge],
   )
 
   return <EditorCtx.Provider value={value}>{children}</EditorCtx.Provider>

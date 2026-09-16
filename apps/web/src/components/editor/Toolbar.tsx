@@ -13,7 +13,7 @@ type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () =>
 
 export default function Toolbar() {
   const {
-    project, selected, selectedIds, alignSelected, openTool, deleteLayer, duplicate, reorder,
+    project, selected, selectedIds, alignSelected, openTool, deleteLayer, deleteLayers, duplicate, reorder,
     createGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
     timelineOpen, toggleTimeline,
   } = useEditor()
@@ -37,7 +37,7 @@ export default function Toolbar() {
       { key: 'up', label: 'Forward', icon: <ArrowUp />, onClick: () => reorder(selected.id, 1) },
       { key: 'down', label: 'Back', icon: <ArrowDown />, onClick: () => reorder(selected.id, -1) },
       { key: 'dup', label: 'Duplicate', icon: <Copy />, onClick: () => duplicate(selected.id) },
-      { key: 'del', label: 'Delete', icon: <Trash2 />, onClick: () => deleteLayer(selected.id), danger: true },
+      { key: 'del', label: 'Delete', icon: <Trash2 />, onClick: () => (isMulti ? deleteLayers(selectedIds) : deleteLayer(selected.id)), danger: true },
     ]
 
     if (selected.type === 'group') {

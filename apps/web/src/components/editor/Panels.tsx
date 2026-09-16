@@ -614,9 +614,11 @@ function FontPanel() {
 }
 
 function ColorPanel() {
-  const { l, up } = useSel()
+  const { selected, selectedIds, updateLayers } = useEditor()
+  const l = selected!
   const key = l.type === 'shape' ? 'fill' : 'color'
   const cur = (l as any)[key]
+  const up = (patch: Record<string, string>) => updateLayers(selectedIds, patch)
   return (
     <Grid cols={6}>
       {PALETTE.map((c) => (
