@@ -1734,7 +1734,17 @@ export default function Canvas() {
       data-testid="canvas"
     >
       {scale > 0 && (
-        <div style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`, transformOrigin: 'center', willChange: 'transform' }}>
+        <div
+          className="relative shrink-0"
+          style={{
+            width: preset.w,
+            height: preset.h,
+            transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+            transformOrigin: 'center',
+            willChange: 'transform',
+          }}
+          data-testid="camera-stage"
+        >
         <div
           className="relative shrink-0 shadow-2xl"
           style={{ width: preset.w, height: preset.h, transform: `scale(${scale})`, transformOrigin: 'center', ...bgStyle }}
@@ -1742,9 +1752,10 @@ export default function Canvas() {
         >
           {snapGuides && snapGuides.active && (
             <>
-              <div
-                key="snap-x-center"
-                aria-hidden="true"
+              {snapGuides.xGuides.includes(preset.w / 2) && (
+                <div
+                  key="snap-x-center"
+                  aria-hidden="true"
                 data-testid="snap-guide-vertical"
                 data-snapped={snapGuides.xGuides.includes(preset.w / 2)}
                 style={{
@@ -1754,9 +1765,10 @@ export default function Canvas() {
                   height: preset.h + 96 / eff,
                   borderLeft: `${Math.max(1, 1.5 / eff)}px solid ${snapGuides.xGuides.includes(preset.w / 2) ? '#ff3b30' : '#eeeeee'}`,
                   pointerEvents: 'none',
-                  zIndex: 70,
-                }}
-              />
+                    zIndex: 70,
+                  }}
+                />
+              )}
               {Array.from(new Set(snapGuides.xGuides.filter((x) => x !== preset.w / 2))).map((x, idx) => (
                 <div
                   key={`snap-x-${x}-${idx}`}
@@ -1774,9 +1786,10 @@ export default function Canvas() {
                   }}
                 />
               ))}
-              <div
-                key="snap-y-center"
-                aria-hidden="true"
+              {snapGuides.yGuides.includes(preset.h / 2) && (
+                <div
+                  key="snap-y-center"
+                  aria-hidden="true"
                 data-testid="snap-guide-horizontal"
                 data-snapped={snapGuides.yGuides.includes(preset.h / 2)}
                 style={{
@@ -1784,11 +1797,12 @@ export default function Canvas() {
                   left: -48 / eff,
                   top: preset.h / 2,
                   width: preset.w + 96 / eff,
-                  borderTop: `${Math.max(1, 1.5 / eff)}px solid ${snapGuides.yGuides.includes(preset.h / 2) ? '#ff3b30' : '#eeeeee'}`,
-                  pointerEvents: 'none',
-                  zIndex: 70,
-                }}
-              />
+                    borderTop: `${Math.max(1, 1.5 / eff)}px solid ${snapGuides.yGuides.includes(preset.h / 2) ? '#ff3b30' : '#eeeeee'}`,
+                    pointerEvents: 'none',
+                    zIndex: 70,
+                  }}
+                />
+              )}
               {Array.from(new Set(snapGuides.yGuides.filter((y) => y !== preset.h / 2))).map((y, idx) => (
                 <div
                   key={`snap-y-${y}-${idx}`}

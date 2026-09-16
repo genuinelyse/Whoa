@@ -15,7 +15,7 @@ const TITLES: Record<string, string> = {
   components: 'Components Library',
   background: 'Background', layers: 'Layers', font: 'Font', color: 'Color',
   style: 'Text Style', align: 'Alignment', shape: 'Shape', radius: 'Corner Radius',
-  opacity: 'Opacity', animate: 'Animation', mask: 'Mask & Cut', crop: 'Crop',
+  animate: 'Animation', mask: 'Mask & Cut', crop: 'Crop',
 }
 
 export default function ToolSheet() {
@@ -41,7 +41,7 @@ export default function ToolSheet() {
 
 function PanelBody({ tool }: { tool: string }) {
   const { selected } = useEditor()
-  const needsLayer = ['font', 'color', 'style', 'align', 'shape', 'radius', 'opacity', 'animate', 'mask', 'crop']
+  const needsLayer = ['font', 'color', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop']
   if (needsLayer.includes(tool) && !selected) {
     return <MockPanel text="Select a layer on the canvas first." />
   }
@@ -59,7 +59,6 @@ function PanelBody({ tool }: { tool: string }) {
     case 'align': return <AlignPanel />
     case 'shape': return <ShapePanel />
     case 'radius': return <RadiusPanel />
-    case 'opacity': return <OpacityPanel />
     case 'animate': return <AnimatePanel />
     case 'mask': return <MaskPanel />
     case 'crop': return <MockPanel text="Pinch & drag on canvas to crop — full crop tool coming with the backend." />
@@ -614,19 +613,27 @@ function FontPanel() {
 }
 
 function ColorPanel() {
-  const { l, up } = useSel()
+  const { selected, selectedIds, updateLayers } = useEditor()
+  const l = selected!
   const key = l.type === 'shape' ? 'fill' : 'color'
   const cur = (l as any)[key]
+  const up = (patch: Record<string, string>) => updateLayers(selectedIds, patch)
   return (
-    <Grid cols={6}>
-      {PALETTE.map((c) => (
-        <button key={c} data-testid={`color-${c}`} onClick={() => up({ [key]: c })}
-          style={{ background: c }}
-          className={`aspect-square rounded-full border-2 transition-transform active:scale-90 ${cur === c ? 'border-accent ring-2 ring-accent/40' : 'border-line'}`} />
-      ))}
-    </Grid>
+  <>
+  <div className="pb-1">
+  <Grid cols={6}>
+  {PALETTE.map((c) => (
+  <button key={c} data-testid={`color-${c}`} onClick={() => up({ [key]: c })}
+  style={{ background: c }}
+  className={`aspect-square rounded-full border-2 transition-transform active:scale-90 ${cur === c ? 'border-accent ring-2 ring-accent/40' : 'border-line'}`} />
+  ))}
+  </Grid>
+  </div>
+  <Slider label="Opacity" tid="slider-opacity" value={(l.opacity ?? 1) * 100} min={0} max={100} suffix="%" onChange={(v: number) => updateLayers(selectedIds, { opacity: v / 100 })} />
+  </>
   )
-}
+  }
+
 
 function Slider({ label, value, min, max, step = 1, onChange, tid, suffix = '' }: any) {
   return (
@@ -648,8 +655,7 @@ function StylePanel() {
     <div className="pb-4">
       <Slider label="Size" tid="slider-size" value={l.fontSize || 40} min={10} max={400} onChange={(v: number) => up({ fontSize: v })} />
       <Slider label="Weight" tid="slider-weight" value={l.fontWeight || 700} min={400} max={800} step={100} onChange={(v: number) => up({ fontWeight: v })} />
-      <Slider label="Opacity" tid="slider-opacity-style" value={(l.opacity ?? 1) * 100} min={10} max={100} suffix="%" onChange={(v: number) => up({ opacity: v / 100 })} />
-    </div>
+        </div>
   )
 }
 
@@ -684,10 +690,6 @@ function RadiusPanel() {
   return <div className="pb-4"><Slider label="Corner radius" tid="slider-radius" value={l.radius || 0} min={0} max={200} onChange={(v: number) => up({ radius: v })} /></div>
 }
 
-function OpacityPanel() {
-  const { l, up } = useSel()
-  return <div className="pb-4"><Slider label="Opacity" tid="slider-opacity" value={(l.opacity ?? 1) * 100} min={0} max={100} suffix="%" onChange={(v: number) => up({ opacity: v / 100 })} /></div>
-}
 
 function AnimatePanel() {
   const { l, up } = useSel()
