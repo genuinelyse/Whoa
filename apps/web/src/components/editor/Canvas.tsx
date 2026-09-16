@@ -1734,7 +1734,17 @@ export default function Canvas() {
       data-testid="canvas"
     >
       {scale > 0 && (
-        <div style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`, transformOrigin: 'center', willChange: 'transform' }}>
+        <div
+          className="relative shrink-0"
+          style={{
+            width: preset.w,
+            height: preset.h,
+            transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+            transformOrigin: 'center',
+            willChange: 'transform',
+          }}
+          data-testid="camera-stage"
+        >
         <div
           className="relative shrink-0 shadow-2xl"
           style={{ width: preset.w, height: preset.h, transform: `scale(${scale})`, transformOrigin: 'center', ...bgStyle }}
