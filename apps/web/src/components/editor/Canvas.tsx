@@ -831,13 +831,18 @@ export default function Canvas() {
             y: Math.round(finalY),
             w: Math.round(finalW),
             h: Math.round(finalH),
-            ...(g.origCrop ? {
-              crop: {
-                ...g.origCrop,
-                x: Math.round(isLeft ? g.origCrop.x - (finalX - g.ox) : g.origCrop.x),
-                y: Math.round(isTop ? g.origCrop.y - (finalY - g.oy) : g.origCrop.y),
-              },
-            } : {}),
+            ...(g.origCrop ? (() => {
+              const sX = finalW / g.ow
+              const sY = finalH / g.oh
+              return {
+                crop: {
+                  x: Math.round((isLeft ? finalW : 0) + (g.origCrop.x - (isLeft ? g.ow : 0)) * sX),
+                  y: Math.round((isTop ? finalH : 0) + (g.origCrop.y - (isTop ? g.oh : 0)) * sY),
+                  w: Math.round(g.origCrop.w * sX),
+                  h: Math.round(g.origCrop.h * sY),
+                },
+              }
+            })() : {}),
           })
         } else {
           const excludeIds = getExcludeIds(g.id)
