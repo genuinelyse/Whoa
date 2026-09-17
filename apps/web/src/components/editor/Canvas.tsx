@@ -22,12 +22,13 @@ function useSize<T extends HTMLElement>() {
 }
 
 function anim(layer: Layer, time: number, active: boolean) {
-  if (!active) return { opacity: layer.opacity, transform: `rotate(${layer.rotation}deg)`, hidden: false }
-  if (time < layer.start || time > layer.end) return { opacity: 0, transform: '', hidden: true }
+  if (!active) return { opacity: layer.opacity, transform: `rotate(${layer.rotation}deg)`, filter: 'blur(0px)', hidden: false }
+  if (time < layer.start || time > layer.end) return { opacity: 0, transform: '', filter: 'blur(0px)', hidden: true }
   const p = Math.min(1, (time - layer.start) / 450)
   const base = `rotate(${layer.rotation}deg)`
   let opacity = layer.opacity
   let transform = base
+  let filter = 'blur(0px)'
   switch (layer.anim) {
     case 'fade':
       opacity = layer.opacity * p
@@ -44,8 +45,12 @@ function anim(layer: Layer, time: number, active: boolean) {
       opacity = layer.opacity * p
       transform = `translateX(${(1 - p) * -50}px) ${base}`
       break
+    case 'blur':
+      opacity = layer.opacity * p
+      filter = `blur(${(1 - p) * 18}px)`
+      break
   }
-  return { opacity, transform, hidden: false }
+  return { opacity, transform, filter, hidden: false }
 }
 
 const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi))
@@ -2308,8 +2313,9 @@ export default function Canvas() {
                   borderRadius: l.type === 'text' && l.radius ? `${l.radius}px` : undefined,
                   margin: 0,
                   boxSizing: 'border-box',
-                  opacity: a.opacity,
-                  transform: a.transform,
+                    opacity: a.opacity,
+                    transform: a.transform,
+                    filter: a.filter,
                   outline: isSel && l.type !== 'group' ? `${2 / eff}px solid ${(multiSelectMode || selectedIds.length > 1) && !pinchActive ? '#4B1D6B' : '#007AFF'}` : 'none',
                   outlineOffset: 0,
                   cursor: l.locked ? 'default' : 'move',

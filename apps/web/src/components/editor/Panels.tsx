@@ -737,7 +737,7 @@ function AnimatePanel() {
   const { setMode } = useEditor()
   const anims = [
     { k: 'none', label: 'None' }, { k: 'fade', label: 'Fade In' }, { k: 'rise', label: 'Rise Up' },
-    { k: 'pop', label: 'Pop' }, { k: 'slide', label: 'Slide In' },
+    { k: 'pop', label: 'Pop' }, { k: 'slide', label: 'Slide In' }, { k: 'blur', label: 'Blur In' },
   ]
   return (
     <div className="pb-4">
