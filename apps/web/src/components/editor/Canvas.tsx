@@ -3765,7 +3765,7 @@ function LayerContent({
               height: `${layer.crop.h}px`,
               maxWidth: 'none',
               maxHeight: 'none',
-              objectFit: 'fill',
+              objectFit: 'cover',
               pointerEvents: 'none',
               WebkitTouchCallout: 'none',
               WebkitUserSelect: 'none',
