@@ -92,8 +92,30 @@ export default function Toolbar() {
   }
 
   const handleContain = () => {
-    updateImagePosition('center center', 'contain')
-    setPositionMode('contain')
+    if (!selected || selected.type !== 'image') return
+
+    const applyContainRatio = (naturalWidth: number, naturalHeight: number) => {
+      if (!naturalWidth || !naturalHeight) return
+      const width = selected.h * (naturalWidth / naturalHeight)
+      const x = selected.x + (selected.w - width) / 2
+      updateLayer(selected.id, {
+        x,
+        w: width,
+        imagePosition: 'center center',
+        imageFit: 'contain',
+      })
+      setPositionMode('contain')
+    }
+
+    const image = document.querySelector(`[data-testid="layer-${selected.id}"] img`) as HTMLImageElement | null
+    if (image?.naturalWidth && image.naturalHeight) {
+      applyContainRatio(image.naturalWidth, image.naturalHeight)
+      return
+    }
+
+    const source = new window.Image()
+    source.onload = () => applyContainRatio(source.naturalWidth, source.naturalHeight)
+    source.src = selected.src || ''
   }
 
   const handleOriginalRatio = () => {
