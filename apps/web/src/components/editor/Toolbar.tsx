@@ -388,7 +388,7 @@ export default function Toolbar() {
                     data-testid="image-bg-align-pill"
                     role="toolbar"
                     aria-label="Background positions alignment controls"
-                    className="flex w-9 flex-col items-center gap-1 rounded-full border border-white/10 bg-black/80 p-1 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all duration-200 animate-in fade-in zoom-in-95 slide-in-from-bottom-2"
+                    className="flex w-9 flex-col items-center gap-1 rounded-full border border-white/10 bg-black/60 p-1 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all duration-200 animate-in fade-in zoom-in-95 slide-in-from-bottom-2"
                   >
                     {bgAlignItems.map((item) => {
                     const isActive = positionMode === item.key
