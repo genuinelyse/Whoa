@@ -7,7 +7,7 @@ import {
   AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Magnet, ChevronUp, ChevronDown, Lock, Unlock,
-  Move, ArrowUpToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Ratio, LayoutGrid,
+  Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Ratio, LayoutGrid,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
 
@@ -76,6 +76,11 @@ export default function Toolbar() {
     setPositionMode('mid')
   }
 
+  const handleBottom = () => {
+    updateImagePosition('center bottom')
+    setPositionMode('bottom')
+  }
+
   const handleLeft = () => {
     updateImagePosition('left center')
     setPositionMode('left')
@@ -114,6 +119,12 @@ export default function Toolbar() {
       label: 'Mid',
       icon: <AlignVerticalJustifyCenter className="h-4 w-4" />,
       onClick: handleMid,
+    },
+    {
+      key: 'bottom',
+      label: 'Bottom',
+      icon: <ArrowDownToLine className="h-4 w-4" />,
+      onClick: handleBottom,
     },
     {
       key: 'left',
@@ -413,7 +424,7 @@ export default function Toolbar() {
                     onClick={() => setIsAlignExpanded(false)}
                     className="grid h-8 w-8 place-items-center rounded-full text-white/60 transition-all hover:bg-white/20 hover:text-white active:scale-90 focus:outline-none"
                   >
-                    <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                    <ChevronUp className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
               ) : (
