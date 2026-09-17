@@ -21,7 +21,7 @@ export interface Layer {
   locked: boolean
   start: number // ms
   end: number // ms
-  anim: 'none' | 'fade' | 'rise' | 'pop' | 'slide'
+  anim: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur'
   // text
   text?: string
   fontFamily?: string
