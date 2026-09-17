@@ -41,6 +41,8 @@ export interface Layer {
   // image / sticker
   src?: string
   emoji?: string
+  imagePosition?: string
+  imageFit?: 'cover' | 'contain'
   lockProportions?: boolean
   // group / component hierarchy
   groupId?: string
