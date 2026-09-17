@@ -1,15 +1,16 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, Fragment } from 'react'
 import {
   Type, Shapes, Sticker, Image as ImageIcon, Layers as LayersIcon, Palette,
   Copy, Trash2, Wand2, AlignLeft, Bold, PaintBucket, Square,
-  ArrowUp, ArrowDown, Scissors, Crop, FolderPlus, Ungroup, Component as ComponentIcon,
+  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Scissors, Crop, FolderPlus, Ungroup, Component as ComponentIcon,
   AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd,
   AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Magnet, ChevronUp, ChevronDown, Lock, Unlock,
-  Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Ratio, LayoutGrid,
+  Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Expand,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
+import { parseImagePosition } from '#/lib/imagePosition'
 
 type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () => void; danger?: boolean; accent?: boolean; active?: boolean }
 
@@ -17,7 +18,7 @@ export default function Toolbar() {
   const {
     project, selected, selectedIds, alignSelected, openTool, deleteLayer, deleteLayers, duplicate, reorder,
     createGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
-    timelineOpen, toggleTimeline, updateLayer,
+    timelineOpen, toggleTimeline, updateLayer, imagePositioningId, setImagePositioningId,
   } = useEditor()
 
   const [isAlignExpanded, setIsAlignExpanded] = useState(false)
@@ -53,8 +54,35 @@ export default function Toolbar() {
     }
   }, [isAlignExpanded])
 
+  const isFreehandActive = Boolean(selected && imagePositioningId === selected.id)
+
   const handleFreeHand = () => {
-    setPositionMode('freehand')
+    if (!selected || selected.type !== 'image') return
+    if (isFreehandActive) {
+      setImagePositioningId(null)
+      setPositionMode(null)
+    } else {
+      setImagePositioningId(selected.id)
+      setPositionMode('freehand')
+    }
+  }
+
+  const nudgePosition = (dx: number, dy: number) => {
+    if (!selected || selected.type !== 'image') return
+    if (selected.crop) {
+      updateLayer(selected.id, {
+        crop: {
+          ...selected.crop,
+          x: selected.crop.x + dx,
+          y: selected.crop.y + dy,
+        },
+      })
+      return
+    }
+    const pos = parseImagePosition(selected.imagePosition)
+    const newX = Math.min(100, Math.max(0, Math.round(pos.x + dx)))
+    const newY = Math.min(100, Math.max(0, Math.round(pos.y + dy)))
+    updateImagePosition(`${newX}% ${newY}%`)
   }
 
   const updateImagePosition = (position: string, fit?: 'cover' | 'contain') => {
@@ -62,72 +90,163 @@ export default function Toolbar() {
     const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
     for (const id of ids) {
       const layer = project.layers.find((l) => l.id === id)
-      if (layer?.type === 'image') updateLayer(id, { imagePosition: position, ...(fit ? { imageFit: fit } : {}) })
+      if (layer?.type === 'image') {
+        const patch: Partial<typeof layer> = {
+          imagePosition: position,
+          ...(fit ? { imageFit: fit } : {}),
+        }
+        if (layer.crop) {
+          let newCropX = layer.crop.x
+          let newCropY = layer.crop.y
+          const overflowX = layer.crop.w - layer.w
+          const overflowY = layer.crop.h - layer.h
+          if (position.includes('top')) newCropY = 0
+          else if (position.includes('bottom')) newCropY = -overflowY
+          else if (position.includes('center') || position.includes('mid')) newCropY = -Math.round(overflowY / 2)
+
+          if (position.includes('left')) newCropX = 0
+          else if (position.includes('right')) newCropX = -overflowX
+          else if (position.includes('center') || position.includes('mid')) newCropX = -Math.round(overflowX / 2)
+
+          patch.crop = {
+            ...layer.crop,
+            x: Math.round(newCropX),
+            y: Math.round(newCropY),
+          }
+        }
+        updateLayer(id, patch)
+      }
     }
   }
 
   const handleTop = () => {
+    setImagePositioningId(null)
     updateImagePosition('center top')
     setPositionMode('top')
   }
 
   const handleMid = () => {
+    setImagePositioningId(null)
     updateImagePosition('center center')
     setPositionMode('mid')
   }
 
   const handleBottom = () => {
+    setImagePositioningId(null)
     updateImagePosition('center bottom')
     setPositionMode('bottom')
   }
 
   const handleLeft = () => {
+    setImagePositioningId(null)
     updateImagePosition('left center')
     setPositionMode('left')
   }
 
   const handleRight = () => {
+    setImagePositioningId(null)
     updateImagePosition('right center')
     setPositionMode('right')
   }
 
-  const handleContain = () => {
+  const handleOriginalRatio = () => {
     if (!selected || selected.type !== 'image') return
+    setImagePositioningId(null)
 
-    const applyContainRatio = (naturalWidth: number, naturalHeight: number) => {
+    const processRatio = (naturalWidth: number, naturalHeight: number) => {
       if (!naturalWidth || !naturalHeight) return
-      const width = selected.h * (naturalWidth / naturalHeight)
-      const x = selected.x + (selected.w - width) / 2
+      const natRatio = naturalWidth / naturalHeight
+      // Restores original aspect ratio of image and element bounds around while retaining height
+      const targetH = selected.h
+      const newW = Math.max(15, Math.round(targetH * natRatio))
       updateLayer(selected.id, {
-        x,
-        w: width,
+        w: newW,
+        h: targetH,
+        crop: undefined,
+        imageFit: 'cover',
         imagePosition: 'center center',
-        imageFit: 'contain',
+        ...(selected.lockProportions ? { aspectRatio: natRatio } : {}),
       })
-      setPositionMode('contain')
+      setPositionMode('original-aspect-ratio')
     }
 
-    const image = document.querySelector(`[data-testid="layer-${selected.id}"] img`) as HTMLImageElement | null
-    if (image?.naturalWidth && image.naturalHeight) {
-      applyContainRatio(image.naturalWidth, image.naturalHeight)
+    const img = document.querySelector(`[data-testid="layer-${selected.id}"] img`) as HTMLImageElement | null
+    if (img?.naturalWidth && img.naturalHeight) {
+      processRatio(img.naturalWidth, img.naturalHeight)
       return
     }
 
     const source = new window.Image()
-    source.onload = () => applyContainRatio(source.naturalWidth, source.naturalHeight)
+    source.onload = () => processRatio(source.naturalWidth, source.naturalHeight)
     source.src = selected.src || ''
   }
 
-  const handleOriginalRatio = () => {
-    updateImagePosition('center center', 'cover')
-    setPositionMode('original-aspect-ratio')
+  const handleDynamicCrop = () => {
+    if (!selected || selected.type !== 'image') return
+    setImagePositioningId(null)
+
+    // Toggle off dynamic crop if currently active or crop is applied
+    if (positionMode === 'dynamic-crop' || Boolean(selected.crop)) {
+      updateLayer(selected.id, {
+        crop: undefined,
+      })
+      setPositionMode(null)
+      return
+    }
+
+    // Calculate current rendered image position & size from current state
+    const img = document.querySelector(`[data-testid="layer-${selected.id}"] img`) as HTMLImageElement | null
+    const nw = img?.naturalWidth || selected.w
+    const nh = img?.naturalHeight || selected.h
+    const scale = Math.max(selected.w / nw, selected.h / nh)
+    const renderedW = Math.round(nw * scale)
+    const renderedH = Math.round(nh * scale)
+
+    const pos = parseImagePosition(selected.imagePosition)
+    const overflowX = Math.max(0, renderedW - selected.w)
+    const overflowY = Math.max(0, renderedH - selected.h)
+    const cropX = Math.round(-overflowX * (pos.x / 100))
+    const cropY = Math.round(-overflowY * (pos.y / 100))
+
+    updateLayer(selected.id, {
+      crop: {
+        x: cropX,
+        y: cropY,
+        w: renderedW,
+        h: renderedH,
+      },
+      lockProportions: false,
+    })
+    setPositionMode('dynamic-crop')
+  }
+
+  const isProportionsLocked = Boolean(selected?.type === 'image' && selected.lockProportions)
+
+  const handleToggleLockProportions = () => {
+    if (!selected || selected.type !== 'image') return
+    if (positionMode === 'original-aspect-ratio' || positionMode === 'dynamic-crop') {
+      setPositionMode(null)
+    }
+    const ids = selectedIds.length > 0 ? selectedIds : [selected.id]
+    const nextLocked = !isProportionsLocked
+    for (const id of ids) {
+      const layer = project.layers.find((l) => l.id === id)
+      if (layer && layer.type === 'image') {
+        const currentAspect = layer.h > 0 ? layer.w / layer.h : 1
+        updateLayer(id, {
+          lockProportions: nextLocked,
+          ...(nextLocked ? { aspectRatio: currentAspect } : {}),
+        })
+      }
+    }
   }
 
   const bgAlignItems = [
     {
       key: 'freehand',
-      label: 'Free-hand positioning',
+      label: isFreehandActive ? 'Exit manual positioning' : 'Manual background position adjustment',
       icon: <Move className="h-4 w-4" />,
+      active: isFreehandActive,
       onClick: handleFreeHand,
     },
     {
@@ -161,16 +280,28 @@ export default function Toolbar() {
       onClick: handleRight,
     },
     {
-      key: 'contain',
-      label: 'Contain',
-      icon: <Maximize2 className="h-4 w-4" />,
-      onClick: handleContain,
-    },
-    {
       key: 'original-aspect-ratio',
       label: 'Original aspect ratio',
-      icon: <Ratio className="h-4 w-4" />,
+      title: 'Restores the original aspect ratio of the image and image element bounds around. The image element retains its height.',
+      icon: <Maximize2 className="h-4 w-4" />,
+      active: positionMode === 'original-aspect-ratio',
       onClick: handleOriginalRatio,
+    },
+    {
+      key: 'dynamic-crop',
+      label: positionMode === 'dynamic-crop' || Boolean(selected?.crop) ? 'Dynamic crop (Active)' : 'Dynamic crop',
+      title: 'Dynamic crop: image is positioned where it is in its current state, drag all sides to increase or decrease how much of the image is shown.',
+      icon: <Crop className="h-4 w-4" />,
+      active: positionMode === 'dynamic-crop' || Boolean(selected?.crop),
+      onClick: handleDynamicCrop,
+    },
+    {
+      key: 'lock-proportions',
+      label: isProportionsLocked ? 'Unlock proportions' : 'Lock current proportions',
+      icon: isProportionsLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />,
+      active: isProportionsLocked,
+      onClick: handleToggleLockProportions,
+      dividerBefore: true,
     },
   ]
 
@@ -230,14 +361,13 @@ export default function Toolbar() {
         ...common,
       ]
     } else if (selected.type === 'image') {
-      const isLocked = Boolean(selected.lockProportions)
       items = [
         {
           key: 'lock-proportions',
-          label: isLocked ? 'Unlock proportions' : 'Lock proportions',
-          icon: isLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />,
-          active: isLocked,
-          onClick: () => updateLayer(selected.id, { lockProportions: !isLocked }),
+          label: isProportionsLocked ? 'Unlock proportions' : 'Lock proportions',
+          icon: isProportionsLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />,
+          active: isProportionsLocked,
+          onClick: handleToggleLockProportions,
         },
         { key: 'image', label: 'Replace', icon: <ImageIcon /> },
         { key: 'crop', label: 'Crop', icon: <Crop /> },
@@ -405,49 +535,131 @@ export default function Toolbar() {
             >
               {isAlignExpanded ? (
                 <>
+                  {isFreehandActive && (
+                    <div
+                      id="image-manual-adjust-card"
+                      data-testid="image-manual-adjust-card"
+                      className="absolute right-11 top-0 flex flex-col items-center gap-1.5 rounded-2xl border border-white/10 bg-black/85 p-2.5 text-xs text-white shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 min-w-[130px] z-50 pointer-events-auto"
+                    >
+                      <div className="flex w-full items-center justify-between gap-2 border-b border-white/10 pb-1 font-semibold text-sky-400">
+                        <span className="flex items-center gap-1 text-[11px]">
+                          <Move className="h-3 w-3" /> Adjust
+                        </span>
+                        <button
+                          type="button"
+                          data-testid="image-manual-adjust-done-btn"
+                          onClick={() => {
+                            setImagePositioningId(null)
+                            setPositionMode(null)
+                          }}
+                          className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-white hover:bg-white/20 transition-colors"
+                        >
+                          Done
+                        </button>
+                      </div>
+                      <div className="text-[10px] text-white/70 text-center leading-tight">
+                        Drag image on canvas or nudge:
+                      </div>
+                      <div className="grid grid-cols-3 gap-1 my-0.5">
+                        <div />
+                        <button
+                          type="button"
+                          aria-label="Nudge image up"
+                          onClick={() => nudgePosition(0, -5)}
+                          className="flex h-6 w-6 items-center justify-center rounded bg-white/10 hover:bg-white/20 active:scale-90 transition-all text-white"
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </button>
+                        <div />
+                        <button
+                          type="button"
+                          aria-label="Nudge image left"
+                          onClick={() => nudgePosition(-5, 0)}
+                          className="flex h-6 w-6 items-center justify-center rounded bg-white/10 hover:bg-white/20 active:scale-90 transition-all text-white"
+                        >
+                          <ArrowLeft className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Center image position"
+                          title="Center"
+                          onClick={() => updateImagePosition('center center')}
+                          className="flex h-6 w-6 items-center justify-center rounded bg-white/10 text-[9px] font-bold hover:bg-white/20 active:scale-90 transition-all text-white/90"
+                        >
+                          50%
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Nudge image right"
+                          onClick={() => nudgePosition(5, 0)}
+                          className="flex h-6 w-6 items-center justify-center rounded bg-white/10 hover:bg-white/20 active:scale-90 transition-all text-white"
+                        >
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </button>
+                        <div />
+                        <button
+                          type="button"
+                          aria-label="Nudge image down"
+                          onClick={() => nudgePosition(0, 5)}
+                          className="flex h-6 w-6 items-center justify-center rounded bg-white/10 hover:bg-white/20 active:scale-90 transition-all text-white"
+                        >
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </button>
+                        <div />
+                      </div>
+                      <div className="text-[10px] text-white/50 font-mono">
+                        {(() => {
+                          const p = parseImagePosition(selected?.imagePosition)
+                          return `X: ${Math.round(p.x)}% Y: ${Math.round(p.y)}%`
+                        })()}
+                      </div>
+                    </div>
+                  )}
                   <div
                     id="image-bg-align-pill"
                     data-testid="image-bg-align-pill"
                     role="toolbar"
                     aria-label="Background positions alignment controls"
-                    className="flex w-9 flex-col items-center gap-1 rounded-full border border-white/10 bg-black/60 p-1 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all duration-200 animate-in fade-in zoom-in-95 slide-in-from-bottom-2"
+                    className="flex w-9 max-h-[70vh] flex-col items-center gap-1 overflow-y-auto rounded-full border border-white/10 bg-black/60 p-1 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all duration-200 animate-in fade-in zoom-in-95 slide-in-from-bottom-2"
                   >
                     {bgAlignItems.map((item) => {
-                    const isActive = positionMode === item.key
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        id={`image-align-${item.key}-btn`}
-                        data-testid={`image-align-${item.key}-btn`}
-                        data-action={item.key}
-                        data-align-action={item.key}
-                        aria-label={item.label}
-                        aria-pressed={isActive}
-                        title={item.label}
-                        onClick={item.onClick}
-                        className={`grid h-8 w-8 place-items-center rounded-full transition-all active:scale-90 focus:outline-none ${
-                          isActive
-                            ? 'bg-accent text-white shadow-sm ring-1 ring-accent/60'
-                            : 'text-white/85 hover:bg-white/20 hover:text-white'
-                        }`}
-                      >
-                        <span className="[&>svg]:h-4 [&>svg]:w-4 flex items-center justify-center">{item.icon}</span>
-                      </button>
-                    )
+                      const isActive = item.active !== undefined ? item.active : positionMode === item.key
+                      return (
+                        <Fragment key={item.key}>
+                          {item.dividerBefore && <div className="my-0.5 h-px w-4 bg-white/20" />}
+                          <button
+                            type="button"
+                            id={`image-align-${item.key}-btn`}
+                            data-testid={`image-align-${item.key}-btn`}
+                            data-action={item.key}
+                            data-align-action={item.key}
+                            aria-label={item.label}
+                            aria-pressed={isActive}
+                            title={item.label}
+                            onClick={item.onClick}
+                            className={`grid h-8 w-8 place-items-center rounded-full transition-all active:scale-90 focus:outline-none ${
+                              isActive
+                                ? 'bg-accent text-white shadow-sm ring-1 ring-accent/60'
+                                : 'text-white/85 hover:bg-white/20 hover:text-white'
+                            }`}
+                          >
+                            <span className="[&>svg]:h-4 [&>svg]:w-4 flex items-center justify-center">{item.icon}</span>
+                          </button>
+                        </Fragment>
+                      )
                     })}
                   </div>
                   <button
                     type="button"
                     id="image-bg-align-btn"
                     data-testid="image-bg-align-btn"
-                    aria-label="Background positions alignment"
-                    title="Background positions alignment"
+                    aria-label="Image sizing and background positioning"
+                    title="Image sizing and background positioning"
                     aria-expanded={true}
                     onClick={() => setIsAlignExpanded(false)}
                     className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/60 text-white/90 shadow-lg backdrop-blur-md transition-all hover:bg-white/20 hover:text-white active:scale-90 focus:outline-none"
                   >
-                    <LayoutGrid className="h-4 w-4" />
+                    <Expand className="h-4 w-4" />
                   </button>
                 </>
               ) : (
@@ -455,13 +667,13 @@ export default function Toolbar() {
                   type="button"
                   id="image-bg-align-btn"
                   data-testid="image-bg-align-btn"
-                  aria-label="Background positions alignment"
-                  title="Background positions alignment"
+                  aria-label="Image sizing and background positioning"
+                  title="Image sizing and background positioning"
                   aria-expanded={false}
                   onClick={() => setIsAlignExpanded(true)}
                   className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/60 text-white/90 shadow-lg backdrop-blur-md transition-all hover:bg-white/20 hover:text-white active:scale-90 focus:outline-none"
                 >
-                  <LayoutGrid className="h-4 w-4" />
+                  <Expand className="h-4 w-4" />
                 </button>
               )}
             </div>

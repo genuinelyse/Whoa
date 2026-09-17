@@ -43,8 +43,15 @@
     font-family: var(--font-sans);
     overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+  }
+  img {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-heading);

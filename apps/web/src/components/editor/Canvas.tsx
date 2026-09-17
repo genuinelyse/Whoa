@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Move } from 'lucide-react'
 import type { Layer, LayerType } from '#/types'
 import { useEditor } from '#/store/editor'
 import { getDescendantLayers, getTopmostGroup } from '#/lib/groups'
 import { findCornerSizeMatch, findSizeMatch, getCandidateTargets, type SizeMatch } from '#/lib/sizeMatch'
 import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
+import { parseImagePosition, formatImagePosition, calcImagePositionDelta } from '#/lib/imagePosition'
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null)
@@ -131,12 +132,27 @@ type Gesture =
       origPadRight: number
       origPadBottom: number
       origPadLeft: number
-      group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number }[]
+      group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number; crop0?: { x: number; y: number; w: number; h: number }; isCroppedImage?: boolean }[]
       bgShapeIds?: string[]
       minFgLeft?: number
       maxFgRight?: number
       minFgTop?: number
       maxFgBottom?: number
+      origCrop?: { x: number; y: number; w: number; h: number }
+    }
+  | {
+      id: string
+      mode: 'image-position'
+      sx: number
+      sy: number
+      startPosX: number
+      startPosY: number
+      layerW: number
+      layerH: number
+      naturalW: number
+      naturalH: number
+      moved: boolean
+      origCrop?: { x: number; y: number; w: number; h: number }
     }
   | null
 
@@ -170,11 +186,23 @@ function findGroupBackgroundShapes(
 
 type Pinch =
   | { mode: 'zoom'; startDist: number; s0: number; lx: number; ly: number }
-  | { mode: 'resize'; id: string; startDist: number; w0: number; h0: number; x0: number; y0: number; fontSize: number; group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number }[] }
+  | {
+      mode: 'resize'
+      id: string
+      startDist: number
+      w0: number
+      h0: number
+      x0: number
+      y0: number
+      fontSize: number
+      group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number; crop0?: { x: number; y: number; w: number; h: number }; isCroppedImage?: boolean }[]
+      crop0?: { x: number; y: number; w: number; h: number }
+      isCroppedImage?: boolean
+    }
   | null
 
 export default function Canvas() {
-  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing, artboardSnap, nudge } = useEditor()
+  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing, artboardSnap, nudge, imagePositioningId, setImagePositioningId } = useEditor()
   const [nudgeIncrement, setNudgeIncrement] = useState<number>(1)
   const nudgeIncrementRef = useRef<number>(1)
   nudgeIncrementRef.current = nudgeIncrement
@@ -229,6 +257,12 @@ export default function Canvas() {
   const selectedIdsRef = useRef(selectedIds)
   selectedRef.current = selectedId
   selectedIdsRef.current = selectedIds
+  const gestureStartSelectionRef = useRef<string | null>(null)
+  if (touchCount.current === 0 && activeTouches.current.size === 0 && !pinching.current) {
+    gestureStartSelectionRef.current = (selectedId && selectedIds.includes(selectedId))
+      ? selectedId
+      : (selectedIds[0] ?? null)
+  }
   const layersRef = useRef(project.layers)
   layersRef.current = project.layers
   const selHRef = useRef(selH)
@@ -248,6 +282,7 @@ export default function Canvas() {
     count: 0,
   })
   const lastGestureMovedRef = useRef(false)
+  const lastPinchEndTime = useRef(0)
 
   const getExcludeIds = useCallback((gId?: string, group?: { id: string }[]) => {
     const exclude = new Set<string>()
@@ -306,6 +341,33 @@ export default function Canvas() {
       const eff = scale * viewRef.current.scale
       const dx = (e.clientX - g.sx) / eff
       const dy = (e.clientY - g.sy) / eff
+      if (g.mode === 'image-position') {
+        const dist = Math.hypot(e.clientX - g.sx, e.clientY - g.sy)
+        if (dist > 3) g.moved = true
+        if (g.origCrop) {
+          updateLayer(g.id, {
+            crop: {
+              ...g.origCrop,
+              x: Math.round(g.origCrop.x + dx),
+              y: Math.round(g.origCrop.y + dy),
+            },
+          })
+          return
+        }
+        const next = calcImagePositionDelta(
+          { x: g.startPosX, y: g.startPosY },
+          dx,
+          dy,
+          g.layerW,
+          g.layerH,
+          g.naturalW,
+          g.naturalH,
+        )
+        updateLayer(g.id, {
+          imagePosition: formatImagePosition(next.x, next.y),
+        })
+        return
+      }
       if (g.mode === 'move') {
         const dist = Math.hypot(e.clientX - g.sx, e.clientY - g.sy)
         if (dist > 4) {
@@ -516,6 +578,16 @@ export default function Canvas() {
             const layer = layersRef.current.find((candidate) => candidate.id === item.id)
             if (layer?.type === 'text' && item.fontSize) {
               updateLayer(item.id, { ...patch, fontSize: Math.max(6, Math.round(item.fontSize * sx)) })
+            } else if (layer?.type === 'image' && item.crop0) {
+              updateLayer(item.id, {
+                ...patch,
+                crop: {
+                  x: Math.round(item.crop0.x * sx),
+                  y: Math.round(item.crop0.y * sy),
+                  w: Math.round(item.crop0.w * sx),
+                  h: Math.round(item.crop0.h * sy),
+                },
+              })
             } else {
               updateLayer(item.id, patch)
             }
@@ -759,6 +831,13 @@ export default function Canvas() {
             y: Math.round(finalY),
             w: Math.round(finalW),
             h: Math.round(finalH),
+            ...(g.origCrop ? {
+              crop: {
+                ...g.origCrop,
+                x: Math.round(isLeft ? g.origCrop.x - (finalX - g.ox) : g.origCrop.x),
+                y: Math.round(isTop ? g.origCrop.y - (finalY - g.oy) : g.origCrop.y),
+              },
+            } : {}),
           })
         } else {
           const excludeIds = getExcludeIds(g.id)
@@ -812,7 +891,17 @@ export default function Canvas() {
             if (g.origPadLeft) patch.paddingLeft = Math.round(g.origPadLeft * matchRes.factor)
             updateLayer(g.id, patch)
           } else {
-            updateLayer(g.id, { x: matchRes.x, y: matchRes.y, w: matchRes.w, h: matchRes.h })
+            const scaleFactor = g.ow > 0 ? matchRes.w / g.ow : 1
+            const patch: Partial<Layer> = { x: matchRes.x, y: matchRes.y, w: matchRes.w, h: matchRes.h }
+            if (g.isImage && g.origCrop) {
+              patch.crop = {
+                x: Math.round(g.origCrop.x * scaleFactor),
+                y: Math.round(g.origCrop.y * scaleFactor),
+                w: Math.round(g.origCrop.w * scaleFactor),
+                h: Math.round(g.origCrop.h * scaleFactor),
+              }
+            }
+            updateLayer(g.id, patch)
           }
         }
       } else {
@@ -926,9 +1015,25 @@ export default function Canvas() {
             if (g.isImage && g.lockProportions && g.aspectRatio) {
               const finalH = Math.max(15, Math.round(finalW / g.aspectRatio))
               const finalY = Math.round(g.oy + (g.oh - finalH) / 2)
-              updateLayer(g.id, { w: finalW, h: finalH, y: finalY })
+              const scaleFactor = g.ow > 0 ? finalW / g.ow : 1
+              updateLayer(g.id, {
+                w: finalW,
+                h: finalH,
+                y: finalY,
+                ...(g.origCrop ? {
+                  crop: {
+                    x: Math.round(g.origCrop.x * scaleFactor),
+                    y: Math.round(g.origCrop.y * scaleFactor),
+                    w: Math.round(g.origCrop.w * scaleFactor),
+                    h: Math.round(g.origCrop.h * scaleFactor),
+                  },
+                } : {}),
+              })
             } else {
-              updateLayer(g.id, { w: finalW })
+              updateLayer(g.id, {
+                w: finalW,
+                ...(g.origCrop ? { crop: { ...g.origCrop } } : {}),
+              })
             }
           } else if (handle === 'l') {
             const rawW = Math.max(15, Math.round(g.ow - dx))
@@ -968,9 +1073,32 @@ export default function Canvas() {
             if (g.isImage && g.lockProportions && g.aspectRatio) {
               const finalH = Math.max(15, Math.round(finalW / g.aspectRatio))
               const finalY = Math.round(g.oy + (g.oh - finalH) / 2)
-              updateLayer(g.id, { x: Math.round(finalX), w: finalW, h: finalH, y: finalY })
+              const scaleFactor = g.ow > 0 ? finalW / g.ow : 1
+              updateLayer(g.id, {
+                x: Math.round(finalX),
+                w: finalW,
+                h: finalH,
+                y: finalY,
+                ...(g.origCrop ? {
+                  crop: {
+                    x: Math.round(g.origCrop.x * scaleFactor),
+                    y: Math.round(g.origCrop.y * scaleFactor),
+                    w: Math.round(g.origCrop.w * scaleFactor),
+                    h: Math.round(g.origCrop.h * scaleFactor),
+                  },
+                } : {}),
+              })
             } else {
-              updateLayer(g.id, { x: Math.round(finalX), w: finalW })
+              updateLayer(g.id, {
+                x: Math.round(finalX),
+                w: finalW,
+                ...(g.origCrop ? {
+                  crop: {
+                    ...g.origCrop,
+                    x: Math.round(g.origCrop.x - (finalX - g.ox)),
+                  },
+                } : {}),
+              })
             }
           } else if (handle === 'b') {
             const rawH = Math.max(15, Math.round(g.oh + dy))
@@ -1006,9 +1134,25 @@ export default function Canvas() {
             if (g.isImage && g.lockProportions && g.aspectRatio) {
               const finalW = Math.max(15, Math.round(finalH * g.aspectRatio))
               const finalX = Math.round(g.ox + (g.ow - finalW) / 2)
-              updateLayer(g.id, { h: finalH, w: finalW, x: finalX })
+              const scaleFactor = g.oh > 0 ? finalH / g.oh : 1
+              updateLayer(g.id, {
+                h: finalH,
+                w: finalW,
+                x: finalX,
+                ...(g.origCrop ? {
+                  crop: {
+                    x: Math.round(g.origCrop.x * scaleFactor),
+                    y: Math.round(g.origCrop.y * scaleFactor),
+                    w: Math.round(g.origCrop.w * scaleFactor),
+                    h: Math.round(g.origCrop.h * scaleFactor),
+                  },
+                } : {}),
+              })
             } else {
-              updateLayer(g.id, { h: finalH })
+              updateLayer(g.id, {
+                h: finalH,
+                ...(g.origCrop ? { crop: { ...g.origCrop } } : {}),
+              })
             }
           } else if (handle === 't') {
             const rawH = Math.max(15, Math.round(g.oh - dy))
@@ -1048,9 +1192,32 @@ export default function Canvas() {
             if (g.isImage && g.lockProportions && g.aspectRatio) {
               const finalW = Math.max(15, Math.round(finalH * g.aspectRatio))
               const finalX = Math.round(g.ox + (g.ow - finalW) / 2)
-              updateLayer(g.id, { y: Math.round(finalY), h: finalH, w: finalW, x: finalX })
+              const scaleFactor = g.oh > 0 ? finalH / g.oh : 1
+              updateLayer(g.id, {
+                y: Math.round(finalY),
+                h: finalH,
+                w: finalW,
+                x: finalX,
+                ...(g.origCrop ? {
+                  crop: {
+                    x: Math.round(g.origCrop.x * scaleFactor),
+                    y: Math.round(g.origCrop.y * scaleFactor),
+                    w: Math.round(g.origCrop.w * scaleFactor),
+                    h: Math.round(g.origCrop.h * scaleFactor),
+                  },
+                } : {}),
+              })
             } else {
-              updateLayer(g.id, { y: Math.round(finalY), h: finalH })
+              updateLayer(g.id, {
+                y: Math.round(finalY),
+                h: finalH,
+                ...(g.origCrop ? {
+                  crop: {
+                    ...g.origCrop,
+                    y: Math.round(g.origCrop.y - (finalY - g.oy)),
+                  },
+                } : {}),
+              })
             }
           }
         }
@@ -1132,6 +1299,57 @@ export default function Canvas() {
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName) || editingId) return
+      if (imagePositioningId) {
+        const selLayer = layersRef.current.find((l) => l.id === imagePositioningId)
+        if (selLayer?.type === 'image') {
+          const step = e.shiftKey ? 10 : 2
+          if (selLayer.crop) {
+            if (e.key === 'ArrowLeft') {
+              e.preventDefault()
+              updateLayer(selLayer.id, { crop: { ...selLayer.crop, x: selLayer.crop.x - step } })
+              return
+            } else if (e.key === 'ArrowRight') {
+              e.preventDefault()
+              updateLayer(selLayer.id, { crop: { ...selLayer.crop, x: selLayer.crop.x + step } })
+              return
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              updateLayer(selLayer.id, { crop: { ...selLayer.crop, y: selLayer.crop.y - step } })
+              return
+            } else if (e.key === 'ArrowDown') {
+              e.preventDefault()
+              updateLayer(selLayer.id, { crop: { ...selLayer.crop, y: selLayer.crop.y + step } })
+              return
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              setImagePositioningId(null)
+              return
+            }
+          }
+          const pos = parseImagePosition(selLayer.imagePosition)
+          if (e.key === 'ArrowLeft') {
+            e.preventDefault()
+            updateLayer(selLayer.id, { imagePosition: formatImagePosition(Math.max(0, pos.x - step), pos.y) })
+            return
+          } else if (e.key === 'ArrowRight') {
+            e.preventDefault()
+            updateLayer(selLayer.id, { imagePosition: formatImagePosition(Math.min(100, pos.x + step), pos.y) })
+            return
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            updateLayer(selLayer.id, { imagePosition: formatImagePosition(pos.x, Math.max(0, pos.y - step)) })
+            return
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            updateLayer(selLayer.id, { imagePosition: formatImagePosition(pos.x, Math.min(100, pos.y + step)) })
+            return
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            setImagePositioningId(null)
+            return
+          }
+        }
+      }
       if (e.code === 'Space') {
         isSpacePressed.current = true
       } else if (e.key === 'ArrowLeft') {
@@ -1159,7 +1377,7 @@ export default function Canvas() {
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
     }
-  }, [editingId, handleNudge])
+  }, [editingId, handleNudge, imagePositioningId, setImagePositioningId, updateLayer])
 
   const getPinchTargetAndItems = (effId: string | null) => {
     const targetId = effId || selectedRef.current || selectedIdsRef.current[0] || null
@@ -1204,6 +1422,8 @@ export default function Canvas() {
         w: itemW,
         h: itemH,
         fontSize: item.type === 'text' ? item.fontSize : undefined,
+        crop0: item.type === 'image' && item.crop ? { ...item.crop } : undefined,
+        isCroppedImage: item.type === 'image' && Boolean(item.crop),
       }
     })
 
@@ -1279,6 +1499,20 @@ export default function Canvas() {
         const layer = layersRef.current.find((candidate) => candidate.id === item.id)
         if (layer?.type === 'text' && item.fontSize) {
           updateLayer(item.id, { x, y, w, h, fontSize: Math.max(6, Math.round(item.fontSize * ratioToApply)) })
+        } else if (layer?.type === 'image' && item.crop0) {
+          const scaleFactor = item.w > 0 ? w / item.w : 1
+          updateLayer(item.id, {
+            x,
+            y,
+            w,
+            h,
+            crop: {
+              x: Math.round(item.crop0.x * scaleFactor),
+              y: Math.round(item.crop0.y * scaleFactor),
+              w: Math.round(item.crop0.w * scaleFactor),
+              h: Math.round(item.crop0.h * scaleFactor),
+            },
+          })
         } else {
           updateLayer(item.id, { x, y, w, h })
         }
@@ -1325,8 +1559,25 @@ export default function Canvas() {
       const h = Math.max(20, Math.round(p.h0 * ratioToApply))
       const x = Math.round(p.x0 + (p.w0 - w) / 2)
       const y = Math.round(p.y0 + (p.h0 - h) / 2)
-      if (selected.type === 'text') updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratioToApply)) })
-      else updateLayer(p.id, { x, y, w, h })
+      if (selected.type === 'text') {
+        updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratioToApply)) })
+      } else if (selected.type === 'image' && p.crop0) {
+        const scaleFactor = p.w0 > 0 ? w / p.w0 : 1
+        updateLayer(p.id, {
+          x,
+          y,
+          w,
+          h,
+          crop: {
+            x: Math.round(p.crop0.x * scaleFactor),
+            y: Math.round(p.crop0.y * scaleFactor),
+            w: Math.round(p.crop0.w * scaleFactor),
+            h: Math.round(p.crop0.h * scaleFactor),
+          },
+        })
+      } else {
+        updateLayer(p.id, { x, y, w, h })
+      }
     }
   }
 
@@ -1354,6 +1605,9 @@ export default function Canvas() {
     }
     const onTouchStart = (e: TouchEvent) => {
       touchCount.current = e.touches.length
+      if (!pinchTouchSequence.current && (e.touches.length === 1 || e.touches.length === 2)) {
+        touchSelectionLock.current = gestureStartSelectionRef.current
+      }
       if (e.touches.length >= 2) {
         pinchTouchSequence.current = true
         pinchStartedInMultiSelect.current = multiSelectModeRef.current || selectedIdsRef.current.length > 1
@@ -1379,20 +1633,34 @@ export default function Canvas() {
         }
       }
       if (e.touches.length === 1) {
-        touchSelectionLock.current = (selectedRef.current && selectedIdsRef.current.includes(selectedRef.current))
-          ? selectedRef.current
-          : (selectedIdsRef.current[0] ?? null)
         return
       }
       if (e.touches.length === 2) {
         e.preventDefault()
         const [t1, t2] = [e.touches[0], e.touches[1]]
         const startDist = tdist(t1, t2)
-        const targetId = (touchSelectionLock.current && selectedIdsRef.current.includes(touchSelectionLock.current))
-          ? touchSelectionLock.current
-          : (selectedRef.current && selectedIdsRef.current.includes(selectedRef.current) ? selectedRef.current : (selectedIdsRef.current[0] ?? null))
-        const info = getPinchTargetAndItems(targetId)
+        const targetId = touchSelectionLock.current || gestureStartSelectionRef.current
+        const info = targetId ? getPinchTargetAndItems(targetId) : null
         if (info) {
+          const targetL = layersRef.current.find((l) => l.id === info.primaryId)
+          const isCroppedImage = targetL?.type === 'image' && Boolean(targetL.crop)
+          if (isCroppedImage && targetL) {
+            updateLayer(targetL.id, {
+              lockProportions: true,
+              aspectRatio: targetL.h > 0 ? targetL.w / targetL.h : 1,
+            })
+          }
+          if (info.measured) {
+            for (const m of info.measured) {
+              const l = layersRef.current.find((candidate) => candidate.id === m.id)
+              if (l?.type === 'image' && l.crop) {
+                updateLayer(l.id, {
+                  lockProportions: true,
+                  aspectRatio: l.h > 0 ? l.w / l.h : 1,
+                })
+              }
+            }
+          }
           pinch.current = {
             mode: 'resize',
             id: info.primaryId,
@@ -1403,8 +1671,11 @@ export default function Canvas() {
             y0: info.minY,
             fontSize: info.targetLayer.fontSize || 40,
             group: info.measured,
+            crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
+            isCroppedImage,
           }
         } else {
+          select(null)
           const m = tmid(t1, t2)
           const v = viewRef.current
           const { cx, cy } = center()
@@ -1441,6 +1712,20 @@ export default function Canvas() {
     const onTouchEnd = (e: TouchEvent) => {
       touchCount.current = e.touches.length
       if (e.touches.length < 2 && (pinch.current || pinching.current || pinchTouchSequence.current)) {
+        if (pinch.current?.mode === 'resize') {
+          if (pinch.current.isCroppedImage) {
+            updateLayer(pinch.current.id, { lockProportions: false })
+          }
+          if (pinch.current.group) {
+            for (const item of pinch.current.group) {
+              if (item.isCroppedImage) {
+                updateLayer(item.id, { lockProportions: false })
+              }
+            }
+          }
+        }
+        lastPinchEndTime.current = Date.now()
+        lastGestureMovedRef.current = true
         pinch.current = null
         pinching.current = false
         setPinchActive(false)
@@ -1456,6 +1741,9 @@ export default function Canvas() {
       if (e.touches.length === 0) {
         touchSelectionLock.current = null
         pinchTouchSequence.current = false
+        gestureStartSelectionRef.current = (selectedRef.current && selectedIdsRef.current.includes(selectedRef.current))
+          ? selectedRef.current
+          : (selectedIdsRef.current[0] ?? null)
       }
     }
     const stop = (e: Event) => e.preventDefault()
@@ -1465,6 +1753,7 @@ export default function Canvas() {
     el.addEventListener('touchstart', onTouchStart, { passive: false, capture: true })
     el.addEventListener('touchmove', onTouchMove, { passive: false, capture: true })
     el.addEventListener('touchend', onTouchEnd)
+    el.addEventListener('touchcancel', onTouchEnd)
     el.addEventListener('gesturestart', stop as EventListener, { passive: false })
     el.addEventListener('gesturechange', stop as EventListener, { passive: false })
     return () => {
@@ -1472,6 +1761,7 @@ export default function Canvas() {
       el.removeEventListener('touchstart', onTouchStart)
       el.removeEventListener('touchmove', onTouchMove)
       el.removeEventListener('touchend', onTouchEnd)
+      el.removeEventListener('touchcancel', onTouchEnd)
       el.removeEventListener('gesturestart', stop as EventListener)
       el.removeEventListener('gesturechange', stop as EventListener)
     }
@@ -1497,6 +1787,31 @@ export default function Canvas() {
       return
     }
     if (editingId === l.id) {
+      return
+    }
+    if (imagePositioningId === l.id && l.type === 'image') {
+      e.stopPropagation()
+      const pos = parseImagePosition(l.imagePosition)
+      const imgNode = (layerRefs.current.get(l.id)?.querySelector('img') || document.querySelector(`[data-testid="layer-${l.id}"] img`)) as HTMLImageElement | null
+      const nw = imgNode?.naturalWidth || l.w
+      const nh = imgNode?.naturalHeight || l.h
+
+      const origCrop = l.crop ? { ...l.crop } : undefined
+
+      gesture.current = {
+        id: l.id,
+        mode: 'image-position',
+        sx: e.clientX,
+        sy: e.clientY,
+        startPosX: pos.x,
+        startPosY: pos.y,
+        layerW: l.w,
+        layerH: l.h,
+        naturalW: nw,
+        naturalH: nh,
+        moved: false,
+        origCrop,
+      }
       return
     }
     if (
@@ -1706,6 +2021,9 @@ export default function Canvas() {
   const handleLayerClick = (e: React.MouseEvent, l: Layer) => {
     e.stopPropagation()
     if (l.locked) return
+    if (lastPinchEndTime.current && Date.now() - lastPinchEndTime.current < 200) {
+      return
+    }
     if (lastGestureMovedRef.current) {
       lastGestureMovedRef.current = false
       return
@@ -1793,7 +2111,26 @@ export default function Canvas() {
 
     const isImage = l.type === 'image'
     const lockProportions = isImage ? Boolean(l.lockProportions) : false
-    const aspectRatio = originH > 0 ? originW / originH : 1
+    const aspectRatio = (l.lockProportions && l.aspectRatio) ? l.aspectRatio : (originH > 0 ? originW / originH : 1)
+
+    let origCrop = l.crop ? { ...l.crop } : undefined
+    if (isImage && !origCrop && !lockProportions) {
+      const imgNode = (layerRefs.current.get(l.id)?.querySelector('img') || document.querySelector(`[data-testid="layer-${l.id}"] img`)) as HTMLImageElement | null
+      const nw = imgNode?.naturalWidth || originW
+      const nh = imgNode?.naturalHeight || originH
+      const scale = Math.max(originW / nw, originH / nh)
+      const renderedW = Math.round(nw * scale)
+      const renderedH = Math.round(nh * scale)
+      const pos = parseImagePosition(l.imagePosition)
+      const overflowX = Math.max(0, renderedW - originW)
+      const overflowY = Math.max(0, renderedH - originH)
+      origCrop = {
+        x: Math.round(-overflowX * (pos.x / 100)),
+        y: Math.round(-overflowY * (pos.y / 100)),
+        w: renderedW,
+        h: renderedH,
+      }
+    }
 
     gesture.current = {
       id: l.id,
@@ -1821,6 +2158,7 @@ export default function Canvas() {
       maxFgRight,
       minFgTop,
       maxFgBottom,
+      origCrop,
     }
   }
 
@@ -1838,13 +2176,12 @@ export default function Canvas() {
   return (
     <div
       ref={ref}
-      className="checkerboard relative z-0 flex min-h-0 min-w-0 flex-1 touch-none items-center justify-center overflow-hidden"
+      className="checkerboard relative z-0 flex min-h-0 min-w-0 flex-1 touch-none items-center justify-center overflow-hidden select-none"
+      onContextMenu={(e) => e.preventDefault()}
       onPointerDownCapture={(e) => {
         if (e.pointerType !== 'touch') return
         if (activeTouches.current.size === 0) {
-          touchSelectionLock.current = (selectedRef.current && selectedIdsRef.current.includes(selectedRef.current))
-            ? selectedRef.current
-            : (selectedIdsRef.current[0] ?? null)
+          touchSelectionLock.current = gestureStartSelectionRef.current
         }
         activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
         touchCount.current = activeTouches.current.size
@@ -1872,11 +2209,28 @@ export default function Canvas() {
         pinching.current = true
         pinchTouchSequence.current = true
         gesture.current = null
-        const targetId = (touchSelectionLock.current && selectedIdsRef.current.includes(touchSelectionLock.current))
-          ? touchSelectionLock.current
-          : (selectedRef.current && selectedIdsRef.current.includes(selectedRef.current) ? selectedRef.current : (selectedIdsRef.current[0] ?? null))
-        const info = getPinchTargetAndItems(targetId)
+        const targetId = touchSelectionLock.current || gestureStartSelectionRef.current
+        const info = targetId ? getPinchTargetAndItems(targetId) : null
         if (info) {
+          const targetL = layersRef.current.find((l) => l.id === info.primaryId)
+          const isCroppedImage = targetL?.type === 'image' && Boolean(targetL.crop)
+          if (isCroppedImage && targetL) {
+            updateLayer(targetL.id, {
+              lockProportions: true,
+              aspectRatio: targetL.h > 0 ? targetL.w / targetL.h : 1,
+            })
+          }
+          if (info.measured) {
+            for (const m of info.measured) {
+              const l = layersRef.current.find((candidate) => candidate.id === m.id)
+              if (l?.type === 'image' && l.crop) {
+                updateLayer(l.id, {
+                  lockProportions: true,
+                  aspectRatio: l.h > 0 ? l.w / l.h : 1,
+                })
+              }
+            }
+          }
           pinch.current = {
             mode: 'resize',
             id: info.primaryId,
@@ -1887,9 +2241,12 @@ export default function Canvas() {
             y0: info.minY,
             fontSize: info.targetLayer.fontSize || 40,
             group: info.measured,
+            crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
+            isCroppedImage,
           }
           setPinchActive(true)
         } else {
+          select(null)
           const v = viewRef.current
           const { cx, cy } = center()
           const mx = (points[0].x + points[1].x) / 2
@@ -1908,6 +2265,13 @@ export default function Canvas() {
             if (p.startDist > 0 && p.mode === 'resize') {
               const ratio = currentDist / p.startDist
               applyPinchScaling(p, ratio)
+            } else if (p.startDist > 0 && p.mode === 'zoom') {
+              const ratio = currentDist / p.startDist
+              const mx = (points[0].x + points[1].x) / 2
+              const my = (points[0].y + points[1].y) / 2
+              const s1 = clampN(p.s0 * ratio, 0.5, 6)
+              const { cx, cy } = center()
+              setView({ scale: s1, x: mx - cx - s1 * p.lx, y: my - cy - s1 * p.ly })
             }
           }
         }
@@ -1916,24 +2280,64 @@ export default function Canvas() {
         if (e.pointerType === 'touch') {
           activeTouches.current.delete(e.pointerId)
           if (activeTouches.current.size < 2 && (pinch.current || pinching.current)) {
+            if (pinch.current?.mode === 'resize') {
+              if (pinch.current.isCroppedImage) {
+                updateLayer(pinch.current.id, { lockProportions: false })
+              }
+              if (pinch.current.group) {
+                for (const item of pinch.current.group) {
+                  if (item.isCroppedImage) {
+                    updateLayer(item.id, { lockProportions: false })
+                  }
+                }
+              }
+            }
+            lastPinchEndTime.current = Date.now()
+            lastGestureMovedRef.current = true
             pinch.current = null
             pinching.current = false
             setPinchActive(false)
             setSizeMatch(null)
           }
-          if (activeTouches.current.size === 0) pinchTouchSequence.current = false
+          if (activeTouches.current.size === 0) {
+            pinchTouchSequence.current = false
+            touchSelectionLock.current = null
+            gestureStartSelectionRef.current = (selectedRef.current && selectedIdsRef.current.includes(selectedRef.current))
+              ? selectedRef.current
+              : (selectedIdsRef.current[0] ?? null)
+          }
         }
       }}
       onPointerCancelCapture={(e) => {
         if (e.pointerType === 'touch') {
           activeTouches.current.delete(e.pointerId)
           if (activeTouches.current.size < 2 && (pinch.current || pinching.current)) {
+            if (pinch.current?.mode === 'resize') {
+              if (pinch.current.isCroppedImage) {
+                updateLayer(pinch.current.id, { lockProportions: false })
+              }
+              if (pinch.current.group) {
+                for (const item of pinch.current.group) {
+                  if (item.isCroppedImage) {
+                    updateLayer(item.id, { lockProportions: false })
+                  }
+                }
+              }
+            }
+            lastPinchEndTime.current = Date.now()
+            lastGestureMovedRef.current = true
             pinch.current = null
             pinching.current = false
             setPinchActive(false)
             setSizeMatch(null)
           }
-          if (activeTouches.current.size === 0) pinchTouchSequence.current = false
+          if (activeTouches.current.size === 0) {
+            pinchTouchSequence.current = false
+            touchSelectionLock.current = null
+            gestureStartSelectionRef.current = (selectedRef.current && selectedIdsRef.current.includes(selectedRef.current))
+              ? selectedRef.current
+              : (selectedIdsRef.current[0] ?? null)
+          }
         }
       }}
       onPointerDown={(e) => {
@@ -2240,7 +2644,6 @@ export default function Canvas() {
               return
             }
             if (multiSelectModeRef.current) return
-            if (selectedIdsRef.current.length === 1 && !selectedIdsRef.current.includes(l.id)) return
             if (longPress.current) window.clearTimeout(longPress.current)
             longPress.current = window.setTimeout(() => {
               setMultiSelectMode(true)
@@ -2256,7 +2659,7 @@ export default function Canvas() {
                   onPointerDownCapture={(e) => {
                     if (e.pointerType !== 'touch') return
                     if (activeTouches.current.size === 0 && !multiSelectModeRef.current) {
-                      touchSelectionLock.current = selectedRef.current
+                      touchSelectionLock.current = gestureStartSelectionRef.current
                     }
                     activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
                     touchCount.current = activeTouches.current.size
@@ -2274,17 +2677,14 @@ export default function Canvas() {
                     window.clearTimeout(longPress.current)
                     longPress.current = null
                   }
-                  if (selectedIdsRef.current.length === 1 && !selectedIdsRef.current.includes(l.id)) {
-                    setMultiSelectMode(false)
-                    multiSelectModeRef.current = false
-                    select(null)
-                    return
-                  }
                   if (!multiSelectModeRef.current) {
                     setMultiSelectMode(true)
                     multiSelectModeRef.current = true
                     select(l.id, true)
                     gesture.current = null
+                    try {
+                      navigator.vibrate?.(40)
+                    } catch {}
                   }
                 }}
                 onClick={(e) => handleLayerClick(e, l)}
@@ -2316,11 +2716,20 @@ export default function Canvas() {
                     opacity: a.opacity,
                     transform: a.transform,
                     filter: a.filter,
-                  outline: isSel && l.type !== 'group' ? `${2 / eff}px solid ${(multiSelectMode || selectedIds.length > 1) && !pinchActive ? '#4B1D6B' : '#007AFF'}` : 'none',
+                  outline: isSel && l.type !== 'group'
+                    ? (imagePositioningId === l.id && l.type === 'image'
+                        ? `${2 / eff}px solid #38bdf8`
+                        : `${2 / eff}px solid ${(multiSelectMode || selectedIds.length > 1) && !pinchActive ? '#4B1D6B' : '#007AFF'}`)
+                    : 'none',
                   outlineOffset: 0,
-                  cursor: l.locked ? 'default' : 'move',
+                  cursor: l.locked
+                    ? 'default'
+                    : (imagePositioningId === l.id && l.type === 'image' ? 'grab' : 'move'),
                   pointerEvents: l.type === 'group' ? 'none' : 'auto',
                   touchAction: 'none',
+                  WebkitTouchCallout: 'none',
+                  WebkitUserSelect: 'none',
+                  userSelect: 'none',
                 }}
               >
                 <LayerContent
@@ -2414,8 +2823,18 @@ export default function Canvas() {
               : selected
             const group = isGroup ? groupItems.map((layer) => {
               const rect = measured(layer)
-              return { id: layer.id, x: rect.x, y: rect.y, w: rect.w, h: rect.h, fontSize: layer.type === 'text' ? layer.fontSize : undefined }
+              return {
+                id: layer.id,
+                x: rect.x,
+                y: rect.y,
+                w: rect.w,
+                h: rect.h,
+                fontSize: layer.type === 'text' ? layer.fontSize : undefined,
+                crop0: layer.type === 'image' && layer.crop ? { ...layer.crop } : undefined,
+                isCroppedImage: layer.type === 'image' && Boolean(layer.crop),
+              }
             }) : undefined
+            const isImagePositioning = Boolean(imagePositioningId && imagePositioningId === sel.id && sel.type === 'image')
             return (
               <div
                 style={{
@@ -2426,12 +2845,80 @@ export default function Canvas() {
                   height: boxH,
                   border: (isGroup || multiSelectMode)
                     ? `${2 / eff}px solid ${sel.isComponent ? '#9333ea' : '#4f46e5'}`
-                    : 'none',
+                    : (isImagePositioning ? `${2 / eff}px solid #38bdf8` : 'none'),
                   pointerEvents: 'none',
                   zIndex: 60,
                   boxSizing: 'border-box',
                 }}
               >
+                {isImagePositioning && (
+                  <div
+                    data-testid="image-manual-position-badge"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      position: 'absolute',
+                      top: -36 / eff,
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      backgroundColor: '#090d16',
+                      color: '#ffffff',
+                      fontSize: Math.max(11, 12 / eff),
+                      fontWeight: 600,
+                      padding: `${3 / eff}px ${10 / eff}px`,
+                      borderRadius: 9999,
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8 / eff,
+                      whiteSpace: 'nowrap',
+                      pointerEvents: 'auto',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      zIndex: 90,
+                    }}
+                  >
+                    <Move style={{ width: 14 / eff, height: 14 / eff, color: '#38bdf8' }} />
+                    <span>Drag image to adjust</span>
+                    <button
+                      type="button"
+                      data-testid="image-manual-position-done-btn"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setImagePositioningId(null)
+                      }}
+                      style={{
+                        marginLeft: 4 / eff,
+                        backgroundColor: '#2563eb',
+                        color: '#fff',
+                        padding: `${2 / eff}px ${10 / eff}px`,
+                        borderRadius: 9999,
+                        fontSize: Math.max(10, 11 / eff),
+                        cursor: 'pointer',
+                        border: 'none',
+                        fontWeight: 600,
+                      }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                )}
+                {isImagePositioning && (
+                  <div
+                    data-testid="image-manual-position-grid"
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      pointerEvents: 'none',
+                      border: `${2 / eff}px dashed #38bdf8`,
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <div style={{ position: 'absolute', left: '33.333%', top: 0, bottom: 0, width: 1 / eff, backgroundColor: 'rgba(255,255,255,0.4)' }} />
+                    <div style={{ position: 'absolute', left: '66.666%', top: 0, bottom: 0, width: 1 / eff, backgroundColor: 'rgba(255,255,255,0.4)' }} />
+                    <div style={{ position: 'absolute', top: '33.333%', left: 0, right: 0, height: 1 / eff, backgroundColor: 'rgba(255,255,255,0.4)' }} />
+                    <div style={{ position: 'absolute', top: '66.666%', left: 0, right: 0, height: 1 / eff, backgroundColor: 'rgba(255,255,255,0.4)' }} />
+                  </div>
+                )}
                 {(sel.type === 'group' || sel.isComponent) && (
                   <div
                     data-testid="group-header-badge"
@@ -2493,7 +2980,7 @@ export default function Canvas() {
                     )}
                   </div>
                 )}
-                {corners.map(({ c, cx, cy }) => (
+                {!isImagePositioning && corners.map(({ c, cx, cy }) => (
                   <div
                     key={c}
                     data-testid={`resize-${c}-${isGroup ? 'group' : sel.id}`}
@@ -2514,7 +3001,7 @@ export default function Canvas() {
                     <div style={{ width: dot, height: dot, borderRadius: '9999px', background: '#fff', border: `${Math.max(1.5, dot * 0.18)}px solid ${multiSelectMode || isGroup ? (sel.isComponent ? '#9333ea' : '#4f46e5') : '#007AFF'}` }} />
                   </div>
                 ))}
-                {showSideHandles && sideHandles.map(({ h, cx, cy, cursor }) => (
+                {!isImagePositioning && showSideHandles && sideHandles.map(({ h, cx, cy, cursor }) => (
                   <div
                     key={h}
                     data-testid={`resize-${h}-${isGroup ? 'group' : sel.id}`}
@@ -3241,18 +3728,76 @@ function LayerContent({
   }
 
   if (layer.type === 'image') {
+    if (layer.crop) {
+      return (
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            overflow: 'hidden',
+            position: 'relative',
+            borderRadius: layer.radius || 0,
+            pointerEvents: 'none',
+          }}
+        >
+          <img
+            src={layer.src}
+            alt=""
+            draggable={false}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+            onDragStart={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+            style={{
+              position: 'absolute',
+              left: `${layer.crop.x}px`,
+              top: `${layer.crop.y}px`,
+              width: `${layer.crop.w}px`,
+              height: `${layer.crop.h}px`,
+              maxWidth: 'none',
+              maxHeight: 'none',
+              objectFit: 'fill',
+              pointerEvents: 'none',
+              WebkitTouchCallout: 'none',
+              WebkitUserSelect: 'none',
+              userSelect: 'none',
+              // @ts-expect-error non-standard css property
+              WebkitUserDrag: 'none',
+            }}
+          />
+        </div>
+      )
+    }
     return (
       <img
         src={layer.src}
         alt=""
         draggable={false}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+        }}
+        onDragStart={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+        }}
         style={{
-        width: '100%',
-        height: '100%',
-        objectFit: layer.imageFit || 'cover',
-        objectPosition: layer.imagePosition || 'center center',
-        borderRadius: layer.radius || 0,
-      }}
+          width: '100%',
+          height: '100%',
+          objectFit: layer.imageFit || 'cover',
+          objectPosition: layer.imagePosition || 'center center',
+          borderRadius: layer.radius || 0,
+          pointerEvents: 'none',
+          WebkitTouchCallout: 'none',
+          WebkitUserSelect: 'none',
+          userSelect: 'none',
+          // @ts-expect-error non-standard css property
+          WebkitUserDrag: 'none',
+        }}
       />
     )
   }

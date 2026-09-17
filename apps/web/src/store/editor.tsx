@@ -23,6 +23,7 @@ interface State {
   playing: boolean
   artboardSnap: boolean
   timelineOpen: boolean
+  imagePositioningId: string | null
 }
 
 export type AlignMode =
@@ -61,6 +62,7 @@ type Action =
   | { t: 'setDuration'; duration: number }
   | { t: 'toggleTimeline'; open?: boolean }
   | { t: 'setTimelineOpen'; open: boolean }
+  | { t: 'setImagePositioningId'; id: string | null }
   | { t: 'nudge'; dx: number; dy: number; measured?: Record<string, { x: number; y: number; w: number; h: number }> }
 
 function touch(p: Project): Project {
@@ -70,11 +72,14 @@ function touch(p: Project): Project {
 function reducer(state: State, a: Action): State {
   const p = state.project
   switch (a.t) {
+    case 'setImagePositioningId':
+      return { ...state, imagePositioningId: a.id }
     case 'select':
       return {
         ...state,
         selectedId: a.id,
         selectedIds: a.id ? (a.ids ?? (a.additive ? Array.from(new Set([...state.selectedIds, a.id])) : [a.id])) : [],
+        imagePositioningId: a.id && a.id === state.imagePositioningId ? state.imagePositioningId : null,
       }
     case 'toggleSelect': {
       const selectedIds = state.selectedIds.includes(a.id)
@@ -578,13 +583,15 @@ interface Ctx extends State {
   setDuration: (d: number) => void
   toggleTimeline: (open?: boolean) => void
   setTimelineOpen: (open: boolean) => void
+  imagePositioningId: string | null
+  setImagePositioningId: (id: string | null) => void
   nudge: (dx: number, dy: number, measured?: Record<string, { x: number; y: number; w: number; h: number }>) => void
 }
 
 const EditorCtx = createContext<Ctx | null>(null)
 
 export function EditorProvider({ project, children }: { project: Project; children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false, artboardSnap: true, timelineOpen: false })
+  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false, artboardSnap: true, timelineOpen: false, imagePositioningId: null })
 
   const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
@@ -633,6 +640,7 @@ export function EditorProvider({ project, children }: { project: Project; childr
   const setDuration = useCallback((d: number) => dispatch({ t: 'setDuration', duration: d }), [])
   const toggleTimeline = useCallback((open?: boolean) => dispatch({ t: 'toggleTimeline', open }), [])
   const setTimelineOpen = useCallback((open: boolean) => dispatch({ t: 'setTimelineOpen', open }), [])
+  const setImagePositioningId = useCallback((id: string | null) => dispatch({ t: 'setImagePositioningId', id }), [])
   const nudge = useCallback(
     (dx: number, dy: number, measured?: Record<string, { x: number; y: number; w: number; h: number }>) =>
       dispatch({ t: 'nudge', dx, dy, measured }),
@@ -657,9 +665,9 @@ export function EditorProvider({ project, children }: { project: Project; childr
       select, toggleSelect, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder,
       createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent,
       setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration,
-      toggleTimeline, setTimelineOpen, nudge,
+      toggleTimeline, setTimelineOpen, setImagePositioningId, nudge,
     }),
-    [state, select, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration, toggleTimeline, setTimelineOpen, nudge],
+    [state, select, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration, toggleTimeline, setTimelineOpen, setImagePositioningId, nudge],
   )
 
   return <EditorCtx.Provider value={value}>{children}</EditorCtx.Provider>

@@ -43,7 +43,14 @@ export interface Layer {
   emoji?: string
   imagePosition?: string
   imageFit?: 'cover' | 'contain'
+  crop?: {
+    x: number // px offset relative to layer box top-left
+    y: number // px offset relative to layer box top-left
+    w: number // rendered image width
+    h: number // rendered image height
+  }
   lockProportions?: boolean
+  aspectRatio?: number
   // group / component hierarchy
   groupId?: string
   isComponent?: boolean

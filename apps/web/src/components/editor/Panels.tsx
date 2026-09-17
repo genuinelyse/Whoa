@@ -192,7 +192,13 @@ function Images() {
             data-testid="lock-proportions-toggle"
             aria-label={isLocked ? 'Unlock proportions' : 'Lock proportions'}
             title={isLocked ? 'Unlock proportions' : 'Lock proportions'}
-            onClick={() => updateLayer(selected.id, { lockProportions: !isLocked })}
+            onClick={() => {
+              const next = !isLocked
+              updateLayer(selected.id, {
+                lockProportions: next,
+                ...(next ? { aspectRatio: selected.h > 0 ? selected.w / selected.h : 1 } : {}),
+              })
+            }}
             className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
               isLocked ? 'bg-accent' : 'bg-surface'
             }`}
@@ -222,7 +228,7 @@ function Images() {
             onClick={() => apply(src)}
             className="aspect-square overflow-hidden rounded-xl border border-line active:border-accent"
           >
-            <img src={src} alt="" className="h-full w-full object-cover" />
+            <img src={src} alt="" draggable={false} className="pointer-events-none h-full w-full select-none object-cover" />
           </button>
         ))}
       </Grid>
