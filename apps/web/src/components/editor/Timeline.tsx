@@ -23,6 +23,7 @@ function fmt(ms: number) {
 type Drag =
   | { kind: 'playhead' }
   | { kind: 'trim'; id: string; edge: 'l' | 'r'; s0: number; e0: number; sx: number }
+  | { kind: 'move'; id: string; sx: number; initialStart: number; initialEnd: number }
   | { kind: 'trim-group'; id: string; edge: 'l' | 'r'; s0: number; e0: number; sx: number; initialStarts: Map<string, number>; initialEnds: Map<string, number> }
   | { kind: 'move-group'; id: string; sx: number; initialStarts: Map<string, number>; initialEnds: Map<string, number> }
   | null
@@ -123,6 +124,11 @@ export default function Timeline() {
         } else {
           updateLayer(d.id, { end: Math.min(duration, Math.max(d.s0 + 200, d.e0 + dt)) })
         }
+      } else if (d.kind === 'move') {
+        const dt = (e.clientX - d.sx) / ppms
+        const span = d.initialEnd - d.initialStart
+        const newStart = Math.max(0, Math.min(duration - span, d.initialStart + dt))
+        updateLayer(d.id, { start: newStart, end: newStart + span })
       } else if (d.kind === 'move-group') {
         const dt = (e.clientX - d.sx) / ppms
         for (const [childId, initStart] of d.initialStarts.entries()) {
@@ -286,6 +292,10 @@ export default function Timeline() {
                   e.stopPropagation()
                   drag.current = { kind: 'trim', id: item.layer.id, edge, s0: item.layer.start, e0: item.layer.end, sx: e.clientX }
                 }}
+                onMoveLayer={(e) => {
+                  e.stopPropagation()
+                  drag.current = { kind: 'move', id: item.layer.id, sx: e.clientX, initialStart: item.layer.start, initialEnd: item.layer.end }
+                }}
                 onAnimation={(side, e) => {
                   e.stopPropagation()
                   select(item.layer.id)
@@ -293,6 +303,7 @@ export default function Timeline() {
                   openTool('animate')
                 }}
                 onDragGroup={(e) => startGroupDrag(item.layer.id, e)}
+                onDragLayer={(e) => onMoveLayer(e)}
                 onTrimGroup={(edge, e) => startGroupTrim(item.layer.id, edge, item.effectiveStart, item.effectiveEnd, e)}
               />
             ))}
@@ -328,7 +339,9 @@ function TimelineRow({
   onToggleCollapse,
   onReorder,
   onTrimLayer,
+  onMoveLayer,
   onAnimation,
+  onDragLayer,
   onDragGroup,
   onTrimGroup,
 }: {
@@ -339,6 +352,7 @@ function TimelineRow({
   onToggleCollapse: () => void
   onReorder: (dir: number) => void
   onTrimLayer: (edge: 'l' | 'r', e: React.PointerEvent) => void
+  onMoveLayer: (e: React.PointerEvent) => void
   onAnimation: (side: 'in' | 'out', e: React.PointerEvent) => void
   onDragGroup: (e: React.PointerEvent) => void
   onTrimGroup: (edge: 'l' | 'r', e: React.PointerEvent) => void
@@ -489,8 +503,8 @@ function TimelineRow({
           /* Normal Layer clip */
           <div
             onPointerDown={(e) => {
-              e.stopPropagation()
               onSelect()
+              onDragLayer(e)
             }}
             data-testid={`clip-${layer.id}`}
             className={`absolute top-1.5 flex h-8 items-center overflow-hidden rounded-md border ${
@@ -501,6 +515,7 @@ function TimelineRow({
               width: Math.max(24, (layer.end - layer.start) * ppms),
               background: TRACK_COLOR[layer.type] || '#3B82F6',
               opacity: 0.92,
+              touchAction: 'none',
             }}
           >
             <button
