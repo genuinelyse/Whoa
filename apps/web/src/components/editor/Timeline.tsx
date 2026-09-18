@@ -366,24 +366,57 @@ function TimelineRow({
 
   const indentPx = Math.min(depth * 14, 42)
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pointerDownX = useRef(0)
+  const lastPointerEvent = useRef<React.PointerEvent | null>(null)
+  const touchDragging = useRef(false)
+  const pointerTarget = useRef<HTMLDivElement | null>(null)
+  const pointerId = useRef<number | null>(null)
 
-  const handleLayerPointerDown = (e: React.PointerEvent) => {
-    onSelect()
-    if (e.pointerType === 'touch' || e.pointerType === 'pen') {
-      holdTimer.current = setTimeout(() => {
-        holdTimer.current = null
-        onDragLayer(e)
-      }, 350)
-      return
-    }
-    onDragLayer(e)
-  }
-
-  const handleLayerPointerUp = () => {
+  const clearHold = () => {
     if (holdTimer.current) {
       clearTimeout(holdTimer.current)
       holdTimer.current = null
     }
+  }
+
+  const handleLayerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    onSelect()
+    pointerDownX.current = e.clientX
+    lastPointerEvent.current = e
+    pointerTarget.current = e.currentTarget
+    pointerId.current = e.pointerId
+    touchDragging.current = false
+
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+      holdTimer.current = setTimeout(() => {
+        holdTimer.current = null
+        touchDragging.current = true
+        if (pointerTarget.current && pointerId.current !== null) {
+          pointerTarget.current.setPointerCapture(pointerId.current)
+        }
+        if (lastPointerEvent.current) onDragLayer(lastPointerEvent.current)
+      }, 350)
+      return
+    }
+
+    e.currentTarget.setPointerCapture(e.pointerId)
+    onDragLayer(e)
+  }
+
+  const handleLayerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    lastPointerEvent.current = e
+    if (holdTimer.current && Math.abs(e.clientX - pointerDownX.current) > 8) {
+      clearHold()
+    }
+    if (touchDragging.current) e.preventDefault()
+  }
+
+  const handleLayerPointerUp = () => {
+    clearHold()
+    touchDragging.current = false
+    lastPointerEvent.current = null
+    pointerTarget.current = null
+    pointerId.current = null
   }
 
   return (
@@ -523,6 +556,7 @@ function TimelineRow({
           /* Normal Layer clip */
           <div
             onPointerDown={handleLayerPointerDown}
+            onPointerMove={handleLayerPointerMove}
             onPointerUp={handleLayerPointerUp}
             onPointerCancel={handleLayerPointerUp}
             data-testid={`clip-${layer.id}`}
