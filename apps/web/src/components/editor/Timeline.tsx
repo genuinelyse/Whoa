@@ -23,6 +23,7 @@ function fmt(ms: number) {
 type Drag =
   | { kind: 'playhead' }
   | { kind: 'trim'; id: string; edge: 'l' | 'r'; s0: number; e0: number; sx: number }
+  | { kind: 'move'; id: string; sx: number; initialStart: number; initialEnd: number }
   | { kind: 'trim-group'; id: string; edge: 'l' | 'r'; s0: number; e0: number; sx: number; initialStarts: Map<string, number>; initialEnds: Map<string, number> }
   | { kind: 'move-group'; id: string; sx: number; initialStarts: Map<string, number>; initialEnds: Map<string, number> }
   | null
@@ -43,7 +44,7 @@ interface TimelineRowItem {
 export default function Timeline() {
   const {
     project, time, setTime, playing, setPlaying, selectedId, select,
-    updateLayer, toggleGroupCollapse, reorder, timelineOpen, toggleTimeline,
+    updateLayer, toggleGroupCollapse, reorder, timelineOpen, toggleTimeline, openTool, setAnimationSide,
   } = useEditor()
   const [ppms, setPpms] = useState(0.05)
   const trackRef = useRef<HTMLDivElement>(null)
@@ -123,6 +124,11 @@ export default function Timeline() {
         } else {
           updateLayer(d.id, { end: Math.min(duration, Math.max(d.s0 + 200, d.e0 + dt)) })
         }
+      } else if (d.kind === 'move') {
+        const dt = (e.clientX - d.sx) / ppms
+        const span = d.initialEnd - d.initialStart
+        const newStart = Math.max(0, Math.min(duration - span, d.initialStart + dt))
+        updateLayer(d.id, { start: newStart, end: newStart + span })
       } else if (d.kind === 'move-group') {
         const dt = (e.clientX - d.sx) / ppms
         for (const [childId, initStart] of d.initialStarts.entries()) {
@@ -286,7 +292,18 @@ export default function Timeline() {
                   e.stopPropagation()
                   drag.current = { kind: 'trim', id: item.layer.id, edge, s0: item.layer.start, e0: item.layer.end, sx: e.clientX }
                 }}
+                onMoveLayer={(e) => {
+                  e.stopPropagation()
+                  drag.current = { kind: 'move', id: item.layer.id, sx: e.clientX, initialStart: item.layer.start, initialEnd: item.layer.end }
+                }}
+                onAnimation={(side, e) => {
+                  e.stopPropagation()
+                  select(item.layer.id)
+                  setAnimationSide(side)
+                  openTool('animate')
+                }}
                 onDragGroup={(e) => startGroupDrag(item.layer.id, e)}
+                onDragLayer={(e) => onMoveLayer(e)}
                 onTrimGroup={(edge, e) => startGroupTrim(item.layer.id, edge, item.effectiveStart, item.effectiveEnd, e)}
               />
             ))}
@@ -322,6 +339,9 @@ function TimelineRow({
   onToggleCollapse,
   onReorder,
   onTrimLayer,
+  onMoveLayer,
+  onAnimation,
+  onDragLayer,
   onDragGroup,
   onTrimGroup,
 }: {
@@ -332,6 +352,8 @@ function TimelineRow({
   onToggleCollapse: () => void
   onReorder: (dir: number) => void
   onTrimLayer: (edge: 'l' | 'r', e: React.PointerEvent) => void
+  onMoveLayer: (e: React.PointerEvent) => void
+  onAnimation: (side: 'in' | 'out', e: React.PointerEvent) => void
   onDragGroup: (e: React.PointerEvent) => void
   onTrimGroup: (edge: 'l' | 'r', e: React.PointerEvent) => void
 }) {
@@ -343,6 +365,59 @@ function TimelineRow({
       : layer.name
 
   const indentPx = Math.min(depth * 14, 42)
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pointerDownX = useRef(0)
+  const lastPointerEvent = useRef<React.PointerEvent | null>(null)
+  const touchDragging = useRef(false)
+  const pointerTarget = useRef<HTMLDivElement | null>(null)
+  const pointerId = useRef<number | null>(null)
+
+  const clearHold = () => {
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current)
+      holdTimer.current = null
+    }
+  }
+
+  const handleLayerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    onSelect()
+    pointerDownX.current = e.clientX
+    lastPointerEvent.current = e
+    pointerTarget.current = e.currentTarget
+    pointerId.current = e.pointerId
+    touchDragging.current = false
+
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+      holdTimer.current = setTimeout(() => {
+        holdTimer.current = null
+        touchDragging.current = true
+        if (pointerTarget.current && pointerId.current !== null) {
+          pointerTarget.current.setPointerCapture(pointerId.current)
+        }
+        if (lastPointerEvent.current) onDragLayer(lastPointerEvent.current)
+      }, 350)
+      return
+    }
+
+    e.currentTarget.setPointerCapture(e.pointerId)
+    onDragLayer(e)
+  }
+
+  const handleLayerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    lastPointerEvent.current = e
+    if (holdTimer.current && Math.abs(e.clientX - pointerDownX.current) > 8) {
+      clearHold()
+    }
+    if (touchDragging.current) e.preventDefault()
+  }
+
+  const handleLayerPointerUp = () => {
+    clearHold()
+    touchDragging.current = false
+    lastPointerEvent.current = null
+    pointerTarget.current = null
+    pointerId.current = null
+  }
 
   return (
     <div
@@ -480,10 +555,10 @@ function TimelineRow({
         ) : (
           /* Normal Layer clip */
           <div
-            onPointerDown={(e) => {
-              e.stopPropagation()
-              onSelect()
-            }}
+            onPointerDown={handleLayerPointerDown}
+            onPointerMove={handleLayerPointerMove}
+            onPointerUp={handleLayerPointerUp}
+            onPointerCancel={handleLayerPointerUp}
             data-testid={`clip-${layer.id}`}
             className={`absolute top-1.5 flex h-8 items-center overflow-hidden rounded-md border ${
               selected ? 'border-white ring-1 ring-white/60' : 'border-white/20'
@@ -493,22 +568,39 @@ function TimelineRow({
               width: Math.max(24, (layer.end - layer.start) * ppms),
               background: TRACK_COLOR[layer.type] || '#3B82F6',
               opacity: 0.92,
+              touchAction: 'pan-x',
             }}
           >
+            <button
+              type="button"
+              onPointerDown={(e) => onAnimation('in', e)}
+              data-testid={`anim-in-${layer.id}`}
+              aria-label={`Edit in-animation for ${label}`}
+              title={`In-animation: ${layer.inAnim || layer.anim || 'none'}`}
+              className="absolute left-0 top-0 z-10 h-full w-3 cursor-pointer border-r border-white/20 bg-black/20 transition-colors hover:bg-emerald-300/60"
+            />
             <div
-              onPointerDown={(e) => onTrimLayer('l', e)}
+              onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); onTrimLayer('l', e) }}
               data-testid={`trim-l-${layer.id}`}
-              className="absolute left-0 top-0 h-full w-2 cursor-ew-resize bg-black/25 hover:bg-black/40"
+              className="absolute left-3 top-0 z-20 h-full w-2.5 cursor-ew-resize bg-black/25 hover:bg-black/40"
               style={{ touchAction: 'none' }}
             />
             <span className="pointer-events-none w-full truncate px-3 text-[11px] font-semibold text-white/95 select-none">
               {label}
             </span>
             <div
-              onPointerDown={(e) => onTrimLayer('r', e)}
+              onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); onTrimLayer('r', e) }}
               data-testid={`trim-r-${layer.id}`}
-              className="absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-black/25 hover:bg-black/40"
+              className="absolute right-3 top-0 z-20 h-full w-2.5 cursor-ew-resize bg-black/25 hover:bg-black/40"
               style={{ touchAction: 'none' }}
+            />
+            <button
+              type="button"
+              onPointerDown={(e) => onAnimation('out', e)}
+              data-testid={`anim-out-${layer.id}`}
+              aria-label={`Edit out-animation for ${label}`}
+              title={`Out-animation: ${layer.outAnim || 'none'}`}
+              className="absolute right-0 top-0 z-10 h-full w-3 cursor-pointer border-l border-white/20 bg-black/20 transition-colors hover:bg-rose-300/60"
             />
           </div>
         )}

@@ -738,28 +738,37 @@ function RadiusPanel() {
 }
 
 
-function AnimatePanel() {
+  function AnimatePanel() {
   const { l, up } = useSel()
-  const { setMode } = useEditor()
+  const { setMode, animationSide, setAnimationSide } = useEditor()
   const anims = [
-    { k: 'none', label: 'None' }, { k: 'fade', label: 'Fade In' }, { k: 'rise', label: 'Rise Up' },
-    { k: 'pop', label: 'Pop' }, { k: 'slide', label: 'Slide In' }, { k: 'blur', label: 'Blur In' },
+  { k: 'none', label: 'None' }, { k: 'fade', label: animationSide === 'in' ? 'Fade In' : 'Fade Out' }, { k: 'rise', label: 'Rise Up' },
+  { k: 'pop', label: 'Pop' }, { k: 'slide', label: animationSide === 'in' ? 'Slide In' : 'Slide Out' }, { k: 'blur', label: 'Blur' },
   ]
+  const current = animationSide === 'in' ? (l.inAnim || l.anim || 'none') : (l.outAnim || 'none')
   return (
-    <div className="pb-4">
-      <p className="mb-3 text-sm text-txt2">Pick an entrance animation. Switches the project to <span className="font-semibold text-white">Animated</span> mode so you can preview on the timeline.</p>
-      <Grid cols={2}>
-        {anims.map((a) => (
-          <button key={a.k} data-testid={`anim-${a.k}`}
-            onClick={() => { up({ anim: a.k }); if (a.k !== 'none') setMode('animated') }}
-            className={`rounded-2xl border py-5 text-sm font-semibold ${l.anim === a.k ? 'border-accent bg-accent/10 text-white' : 'border-line bg-surface2 text-txt2'}`}>
-            {a.label}
-          </button>
-        ))}
-      </Grid>
-    </div>
+  <div className="pb-4">
+  <div className="mb-4 flex rounded-xl bg-surface2 p-1">
+  {(['in', 'out'] as const).map((side) => (
+  <button key={side} type="button" onClick={() => setAnimationSide(side)} className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-colors ${animationSide === side ? 'bg-accent text-white' : 'text-txt3'}`}>
+  {side === 'in' ? 'In-animation' : 'Out-animation'}
+  </button>
+  ))}
+  </div>
+  <p className="mb-3 text-sm text-txt2">Choose the {animationSide === 'in' ? 'entrance' : 'exit'} animation for this layer. The timeline edge opens this editor directly.</p>
+  <Grid cols={2}>
+  {anims.map((a) => (
+  <button key={a.k} data-testid={`anim-${animationSide}-${a.k}`} type="button"
+  onClick={() => { up(animationSide === 'in' ? { anim: a.k, inAnim: a.k } : { outAnim: a.k }); if (a.k !== 'none') setMode('animated') }}
+  className={`rounded-2xl border py-5 text-sm font-semibold ${current === a.k ? 'border-accent bg-accent/10 text-white' : 'border-line bg-surface2 text-txt2'}`}>
+  {a.label}
+  </button>
+  ))}
+  </Grid>
+  </div>
   )
-}
+  }
+
 
 function MaskPanel() {
   const { l, up } = useSel()

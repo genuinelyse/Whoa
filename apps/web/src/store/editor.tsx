@@ -24,6 +24,7 @@ interface State {
   artboardSnap: boolean
   timelineOpen: boolean
   imagePositioningId: string | null
+  animationSide: 'in' | 'out'
 }
 
 export type AlignMode =
@@ -63,6 +64,7 @@ type Action =
   | { t: 'toggleTimeline'; open?: boolean }
   | { t: 'setTimelineOpen'; open: boolean }
   | { t: 'setImagePositioningId'; id: string | null }
+  | { t: 'setAnimationSide'; side: 'in' | 'out' }
   | { t: 'nudge'; dx: number; dy: number; measured?: Record<string, { x: number; y: number; w: number; h: number }> }
 
 function touch(p: Project): Project {
@@ -74,6 +76,8 @@ function reducer(state: State, a: Action): State {
   switch (a.t) {
     case 'setImagePositioningId':
       return { ...state, imagePositioningId: a.id }
+    case 'setAnimationSide':
+      return { ...state, animationSide: a.side }
     case 'select':
       return {
         ...state,
@@ -585,18 +589,21 @@ interface Ctx extends State {
   setTimelineOpen: (open: boolean) => void
   imagePositioningId: string | null
   setImagePositioningId: (id: string | null) => void
+  setAnimationSide: (side: 'in' | 'out') => void
   nudge: (dx: number, dy: number, measured?: Record<string, { x: number; y: number; w: number; h: number }>) => void
 }
 
 const EditorCtx = createContext<Ctx | null>(null)
 
 export function EditorProvider({ project, children }: { project: Project; children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false, artboardSnap: true, timelineOpen: false, imagePositioningId: null })
+  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false, artboardSnap: true, timelineOpen: false,   imagePositioningId: null, animationSide: 'in' })
+
 
   const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
   const alignSelected = useCallback((mode: AlignMode, measured?: Record<string, { x: number; y: number; w: number; h: number }>, targetGroupId?: string) => dispatch({ t: 'alignSelected', mode, measured, targetGroupId }), [])
   const openTool = useCallback((tool: string | null) => dispatch({ t: 'tool', tool }), [])
+  const setAnimationSide = useCallback((side: 'in' | 'out') => dispatch({ t: 'setAnimationSide', side }), [])
   const updateLayer = useCallback((id: string, patch: Partial<Layer>) => dispatch({ t: 'updateLayer', id, patch }), [])
   const updateLayers = useCallback((ids: string[], patch: Partial<Layer>) => dispatch({ t: 'updateLayers', ids, patch }), [])
   const deleteLayer = useCallback((id: string) => dispatch({ t: 'deleteLayer', id }), [])
@@ -665,9 +672,9 @@ export function EditorProvider({ project, children }: { project: Project; childr
       select, toggleSelect, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder,
       createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent,
       setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration,
-      toggleTimeline, setTimelineOpen, setImagePositioningId, nudge,
+      toggleTimeline, setTimelineOpen, setImagePositioningId, setAnimationSide, nudge,
     }),
-    [state, select, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration, toggleTimeline, setTimelineOpen, setImagePositioningId, nudge],
+    [state, select, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration, toggleTimeline, setTimelineOpen, setImagePositioningId, setAnimationSide, nudge],
   )
 
   return <EditorCtx.Provider value={value}>{children}</EditorCtx.Provider>
