@@ -577,7 +577,7 @@ function TimelineRow({
               data-testid={`anim-in-${layer.id}`}
               aria-label={`Edit in-animation for ${label}`}
               title={`In-animation: ${layer.inAnim || layer.anim || 'none'}`}
-              className="absolute left-0 top-0 z-10 h-full w-3 cursor-pointer bg-white/10 transition-colors hover:bg-emerald-300/60"
+              className="absolute left-0 top-0 z-10 h-full w-3 cursor-pointer border-r border-white/20 bg-black/20 transition-colors hover:bg-emerald-300/60"
             />
             <div
               onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); onTrimLayer('l', e) }}
@@ -600,7 +600,7 @@ function TimelineRow({
               data-testid={`anim-out-${layer.id}`}
               aria-label={`Edit out-animation for ${label}`}
               title={`Out-animation: ${layer.outAnim || 'none'}`}
-              className="absolute right-0 top-0 z-10 h-full w-3 cursor-pointer bg-white/10 transition-colors hover:bg-rose-300/60"
+              className="absolute right-0 top-0 z-10 h-full w-3 cursor-pointer border-l border-white/20 bg-black/20 transition-colors hover:bg-rose-300/60"
             />
           </div>
         )}
