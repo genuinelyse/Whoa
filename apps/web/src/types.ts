@@ -22,6 +22,8 @@ export interface Layer {
   start: number // ms
   end: number // ms
   anim: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur'
+  inAnim?: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur'
+  outAnim?: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur'
   // text
   text?: string
   fontFamily?: string

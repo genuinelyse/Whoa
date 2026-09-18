@@ -43,7 +43,7 @@ interface TimelineRowItem {
 export default function Timeline() {
   const {
     project, time, setTime, playing, setPlaying, selectedId, select,
-    updateLayer, toggleGroupCollapse, reorder, timelineOpen, toggleTimeline,
+    updateLayer, toggleGroupCollapse, reorder, timelineOpen, toggleTimeline, openTool, setAnimationSide,
   } = useEditor()
   const [ppms, setPpms] = useState(0.05)
   const trackRef = useRef<HTMLDivElement>(null)
@@ -286,6 +286,12 @@ export default function Timeline() {
                   e.stopPropagation()
                   drag.current = { kind: 'trim', id: item.layer.id, edge, s0: item.layer.start, e0: item.layer.end, sx: e.clientX }
                 }}
+                onAnimation={(side, e) => {
+                  e.stopPropagation()
+                  select(item.layer.id)
+                  setAnimationSide(side)
+                  openTool('animate')
+                }}
                 onDragGroup={(e) => startGroupDrag(item.layer.id, e)}
                 onTrimGroup={(edge, e) => startGroupTrim(item.layer.id, edge, item.effectiveStart, item.effectiveEnd, e)}
               />
@@ -322,6 +328,7 @@ function TimelineRow({
   onToggleCollapse,
   onReorder,
   onTrimLayer,
+  onAnimation,
   onDragGroup,
   onTrimGroup,
 }: {
@@ -332,6 +339,7 @@ function TimelineRow({
   onToggleCollapse: () => void
   onReorder: (dir: number) => void
   onTrimLayer: (edge: 'l' | 'r', e: React.PointerEvent) => void
+  onAnimation: (side: 'in' | 'out', e: React.PointerEvent) => void
   onDragGroup: (e: React.PointerEvent) => void
   onTrimGroup: (edge: 'l' | 'r', e: React.PointerEvent) => void
 }) {
@@ -495,10 +503,18 @@ function TimelineRow({
               opacity: 0.92,
             }}
           >
+            <button
+              type="button"
+              onPointerDown={(e) => onAnimation('in', e)}
+              data-testid={`anim-in-${layer.id}`}
+              aria-label={`Edit in-animation for ${label}`}
+              title={`In-animation: ${layer.inAnim || layer.anim || 'none'}`}
+              className="absolute left-0 top-0 z-10 h-full w-3 cursor-pointer bg-white/10 transition-colors hover:bg-emerald-300/60"
+            />
             <div
               onPointerDown={(e) => onTrimLayer('l', e)}
               data-testid={`trim-l-${layer.id}`}
-              className="absolute left-0 top-0 h-full w-2 cursor-ew-resize bg-black/25 hover:bg-black/40"
+              className="absolute left-3 top-0 h-full w-1 cursor-ew-resize bg-black/25 hover:bg-black/40"
               style={{ touchAction: 'none' }}
             />
             <span className="pointer-events-none w-full truncate px-3 text-[11px] font-semibold text-white/95 select-none">
@@ -507,8 +523,16 @@ function TimelineRow({
             <div
               onPointerDown={(e) => onTrimLayer('r', e)}
               data-testid={`trim-r-${layer.id}`}
-              className="absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-black/25 hover:bg-black/40"
+              className="absolute right-3 top-0 h-full w-1 cursor-ew-resize bg-black/25 hover:bg-black/40"
               style={{ touchAction: 'none' }}
+            />
+            <button
+              type="button"
+              onPointerDown={(e) => onAnimation('out', e)}
+              data-testid={`anim-out-${layer.id}`}
+              aria-label={`Edit out-animation for ${label}`}
+              title={`Out-animation: ${layer.outAnim || 'none'}`}
+              className="absolute right-0 top-0 z-10 h-full w-3 cursor-pointer bg-white/10 transition-colors hover:bg-rose-300/60"
             />
           </div>
         )}
