@@ -365,6 +365,26 @@ function TimelineRow({
       : layer.name
 
   const indentPx = Math.min(depth * 14, 42)
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleLayerPointerDown = (e: React.PointerEvent) => {
+    onSelect()
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+      holdTimer.current = setTimeout(() => {
+        holdTimer.current = null
+        onDragLayer(e)
+      }, 350)
+      return
+    }
+    onDragLayer(e)
+  }
+
+  const handleLayerPointerUp = () => {
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current)
+      holdTimer.current = null
+    }
+  }
 
   return (
     <div
@@ -502,10 +522,9 @@ function TimelineRow({
         ) : (
           /* Normal Layer clip */
           <div
-            onPointerDown={(e) => {
-              onSelect()
-              onDragLayer(e)
-            }}
+            onPointerDown={handleLayerPointerDown}
+            onPointerUp={handleLayerPointerUp}
+            onPointerCancel={handleLayerPointerUp}
             data-testid={`clip-${layer.id}`}
             className={`absolute top-1.5 flex h-8 items-center overflow-hidden rounded-md border ${
               selected ? 'border-white ring-1 ring-white/60' : 'border-white/20'
@@ -515,7 +534,7 @@ function TimelineRow({
               width: Math.max(24, (layer.end - layer.start) * ppms),
               background: TRACK_COLOR[layer.type] || '#3B82F6',
               opacity: 0.92,
-              touchAction: 'none',
+              touchAction: 'pan-x',
             }}
           >
             <button
@@ -527,18 +546,18 @@ function TimelineRow({
               className="absolute left-0 top-0 z-10 h-full w-3 cursor-pointer bg-white/10 transition-colors hover:bg-emerald-300/60"
             />
             <div
-              onPointerDown={(e) => onTrimLayer('l', e)}
+              onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); onTrimLayer('l', e) }}
               data-testid={`trim-l-${layer.id}`}
-              className="absolute left-3 top-0 h-full w-1 cursor-ew-resize bg-black/25 hover:bg-black/40"
+              className="absolute left-3 top-0 z-20 h-full w-2.5 cursor-ew-resize bg-black/25 hover:bg-black/40"
               style={{ touchAction: 'none' }}
             />
             <span className="pointer-events-none w-full truncate px-3 text-[11px] font-semibold text-white/95 select-none">
               {label}
             </span>
             <div
-              onPointerDown={(e) => onTrimLayer('r', e)}
+              onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); onTrimLayer('r', e) }}
               data-testid={`trim-r-${layer.id}`}
-              className="absolute right-3 top-0 h-full w-1 cursor-ew-resize bg-black/25 hover:bg-black/40"
+              className="absolute right-3 top-0 z-20 h-full w-2.5 cursor-ew-resize bg-black/25 hover:bg-black/40"
               style={{ touchAction: 'none' }}
             />
             <button
